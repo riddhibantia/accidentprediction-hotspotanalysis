@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RoadSafe AI - Accident Severity Prediction & Hotspot Analysis</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet CSS & JS for Interactive Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Font Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 900: '#1e3a8a' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .leaflet-container { width: 100%; height: 100%; border-radius: 0.75rem; z-index: 10; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
+
+    <div class="flex h-screen w-screen overflow-hidden">
+
+        <!-- Sidebar Navigation -->
+        <aside id="sidebar" class="w-64 bg-slate-900 text-slate-300 flex flex-col transition-all duration-300 z-30 shadow-xl">
+            <div class="h-16 flex items-center px-6 bg-slate-950 border-b border-slate-800">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+                        <i class="fa-solid fa-shield-halved text-lg"></i>
+                    </div>
+                    <div>
+                        <span class="text-lg font-bold tracking-tight text-white block">RoadSafe AI</span>
+                        <span class="text-xs text-blue-400 font-medium">Severity & Hotspot Engine</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">Modules</div>
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all bg-blue-600 text-white shadow-lg shadow-blue-600/20">
+                    <i class="fa-solid fa-chart-pie w-5 text-center"></i>
+                    <span>Overview Dashboard</span>
+                </button>
+                <button onclick="switchTab('predict')" id="nav-predict" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
+                    <i class="fa-solid fa-calculator w-5 text-center"></i>
+                    <span>Predict Severity</span>
+                </button>
+                <button onclick="switchTab('hotspots')" id="nav-hotspots" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
+                    <i class="fa-solid fa-map-location-dot w-5 text-center"></i>
+                    <span>Hotspot Analysis</span>
+                </button>
+                <button onclick="switchTab('analytics')" id="nav-analytics" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
+                    <i class="fa-solid fa-chart-line w-5 text-center"></i>
+                    <span>Data Insights</span>
+                </button>
+                <button onclick="switchTab('comparison')" id="nav-comparison" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
+                    <i class="fa-solid fa-scale-balanced w-5 text-center"></i>
+                    <span>Model Comparison</span>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-slate-800 bg-slate-950/50">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                        <span class="text-xs font-medium text-slate-400">ML Model Active (XGBoost)</span>
+                    </div>
+                </div>
+                <div class="mt-2 text-[11px] text-slate-500">Dataset: STATS19 National Records</div>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col h-full overflow-hidden">
+            <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-20 shrink-0">
+                <div class="flex items-center space-x-4">
+                    <h1 id="page-title" class="text-xl font-bold text-slate-800 tracking-tight">Overview Dashboard</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="hidden md:flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600">
+                        <i class="fa-regular fa-clock text-slate-400"></i>
+                        <span id="current-time"></span>
+                    </div>
+                    <div class="flex items-center space-x-3 pl-3 border-l border-slate-200">
+                        <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 font-semibold flex items-center justify-center text-sm shadow-inner">DS</div>
+                        <div class="hidden sm:block text-left">
+                            <div class="text-sm font-semibold text-slate-800 leading-none">Data Scientist</div>
+                            <div class="text-xs text-slate-500 mt-0.5">Admin Session</div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-6 lg:p-8 bg-slate-50">
+
+                <!-- TAB 1: OVERVIEW DASHBOARD -->
+                <div id="tab-dashboard" class="space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Accidents Analyzed</p>
+                            <h3 class="text-2xl font-bold text-slate-800 mt-1">1,389,640</h3>
+                            <span class="text-xs text-emerald-600 font-medium mt-3 block"><i class="fa-solid fa-arrow-trend-up mr-1"></i> STATS19 Full Dataset</span>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">High-Risk Hotspots</p>
+                            <h3 class="text-2xl font-bold text-slate-800 mt-1">1,260</h3>
+                            <span class="text-xs text-rose-600 font-medium mt-3 block"><i class="fa-solid fa-location-crosshairs mr-1"></i> DBSCAN Clusters</span>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Model Accuracy</p>
+                            <h3 class="text-2xl font-bold text-slate-800 mt-1">85.16%</h3>
+                            <span class="text-xs text-emerald-600 font-medium mt-3 block"><i class="fa-solid fa-circle-check mr-1"></i> XGBoost Classifier</span>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">High Severity Rate</p>
+                            <h3 class="text-2xl font-bold text-slate-800 mt-1">14.8%</h3>
+                            <span class="text-xs text-amber-600 font-medium mt-3 block"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Fatal / Serious Ratio</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm lg:col-span-2 flex flex-col justify-between">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-base font-bold text-slate-800">Accident Severity Distribution</h3>
+                                <span class="px-2.5 py-1 bg-blue-50 text-blue-600 font-semibold text-xs rounded-lg">Live Model Stats</span>
+                            </div>
+                            <div class="h-64 relative"><canvas id="overviewSeverityChart"></canvas></div>
+                        </div>
+
+                        <div class="bg-gradient-to-br from-blue-900 to-indigo-900 rounded-2xl p-6 text-white shadow-xl flex flex-col justify-between">
+                            <div>
+                                <span class="px-3 py-1 bg-blue-500/30 text-blue-200 text-xs font-semibold rounded-full uppercase">Predictive Tool</span>
+                                <h3 class="text-xl font-bold mt-3">Test New Incident Conditions</h3>
+                                <p class="text-xs text-slate-300 mt-2 leading-relaxed">Input road parameters into our trained XGBoost model for real-time risk assessment.</p>
+                            </div>
+                            <div class="mt-6">
+                                <button onclick="switchTab('predict')" class="w-full py-3 bg-white text-blue-900 font-semibold text-sm rounded-xl shadow-lg hover:bg-blue-50 transition-colors flex items-center justify-center space-x-2">
+                                    <span>Launch Predictor</span><i class="fa-solid fa-arrow-right text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: PREDICT SEVERITY -->
+                <div id="tab-predict" class="hidden space-y-6">
+                    <div class="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-sm">
+                        <div class="max-w-3xl mb-8">
+                            <h2 class="text-xl font-bold text-slate-800">Accident Severity Prediction Engine</h2>
+                            <p class="text-sm text-slate-500 mt-1">Configure environmental and vehicular parameters for backend inference.</p>
+                        </div>
+
+                        <form id="prediction-form" onsubmit="handlePrediction(event)" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Latitude</label>
+                                <input type="number" step="any" id="lat" value="51.5074" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Longitude</label>
+                                <input type="number" step="any" id="lng" value="-0.1278" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Weather Condition</label>
+                                <select id="weather" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="Clear">Clear / Dry</option>
+                                    <option value="Rain">Rain / Wet</option>
+                                    <option value="Fog">Fog / Mist</option>
+                                    <option value="Snow">Snow</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Road Surface Type</label>
+                                <select id="surface" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="Dry Asphalt">Dry</option>
+                                    <option value="Wet Asphalt">Wet or damp</option>
+                                    <option value="Potholes">Frost or ice</option>
+                                    <option value="Unpaved">Snow</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Select Machine Learning Model</label>
+                                <select id="algorithm-select" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="xgboost">XGBoost Classifier (Proposed)</option>
+                                <option value="random_forest">Random Forest Classifier</option>
+                                <option value="logistic_regression">Logistic Regression (Baseline)</option>
+                                </select>
+                            </div>
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Speed Limit (MPH)</label>
+                                <input type="number" id="speed" value="30" min="15" max="85" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div class="md:col-span-2 pt-4">
+                                <button type="submit" class="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    <span>Run XGBoost Severity Prediction</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="prediction-result" class="hidden bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-lg">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                            <h3 class="text-lg font-bold text-slate-800">Inference Results & Probabilities</h3>
+                            <span id="badge-severity" class="px-3 py-1 rounded-full text-xs font-semibold uppercase"></span>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
+                                <span class="text-xs font-medium text-slate-500 uppercase">Predicted Severity</span>
+                                <div id="res-severity" class="text-2xl font-bold mt-2">--</div>
+                            </div>
+                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
+                                <span class="text-xs font-medium text-slate-500 uppercase">Model Confidence</span>
+                                <div id="res-confidence" class="text-2xl font-bold text-blue-600 mt-2">--</div>
+                            </div>
+                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
+                                <span class="text-xs font-medium text-slate-500 uppercase">Hotspot Cluster Match</span>
+                                <div id="res-cluster" class="text-2xl font-bold text-slate-800 mt-2">--</div>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <p class="text-xs font-semibold text-slate-600 uppercase mb-2">Class Probability Breakdown</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Slight Injury</span><span id="prob-slight">--</span></div>
+                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-slight" class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Serious Injury</span><span id="prob-serious">--</span></div>
+                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-serious" class="bg-amber-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Fatal Injury</span><span id="prob-fatal">--</span></div>
+                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-fatal" class="bg-rose-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: HOTSPOT ANALYSIS -->
+                <div id="tab-hotspots" class="hidden space-y-6 h-[calc(100vh-10rem)]">
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm h-full flex flex-col">
+                        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-100 gap-4 shrink-0">
+                            <div>
+                                <h2 class="text-xl font-bold text-slate-800">Spatial Hotspot Clustering (DBSCAN)</h2>
+                                <p class="text-xs text-slate-500 mt-0.5">Interactive map displaying high-risk accident corridors.</p>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <button onclick="filterMap('all')" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">All Zones</button>
+                                <button onclick="filterMap('fatal')" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg">Fatal Hotspots</button>
+                                <button onclick="filterMap('serious')" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-semibold rounded-lg">Serious Hotspots</button>
+                            </div>
+                        </div>
+                        <div class="flex-1 mt-4 relative min-h-[400px]">
+                            <div id="map" class="w-full h-full rounded-xl"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: DATA INSIGHTS & ANALYTICS -->
+                <div id="tab-analytics" class="hidden space-y-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <h3 class="text-base font-bold text-slate-800 mb-4">Accidents by Weather Condition</h3>
+                            <div class="h-72 relative"><canvas id="weatherChart"></canvas></div>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <h3 class="text-base font-bold text-slate-800 mb-4">Accidents by Time of Day</h3>
+                            <div class="h-72 relative"><canvas id="timeChart"></canvas></div>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <h3 class="text-base font-bold text-slate-800 mb-4">Severity by Road Surface Type</h3>
+                            <div class="h-72 relative"><canvas id="surfaceChart"></canvas></div>
+                        </div>
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
+                            <h3 class="text-base font-bold text-slate-800 mb-4">Speed Limit vs High Severity %</h3>
+                            <div class="h-72 relative"><canvas id="speedChart"></canvas></div>
+                        </div>
+
+                        <!-- TAB: MODEL COMPARISON (Research Evaluation) -->
+<div id="tab-comparison" class="hidden space-y-6">
+    <div class="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-sm">
+        <div class="max-w-3xl mb-6">
+            <h2 class="text-xl font-bold text-slate-800">Research Evaluation & Algorithm Benchmarks</h2>
+            <p class="text-sm text-slate-500 mt-1">Comparing baseline, ensemble, and hybrid spatial-boosted classifiers on the STATS19 test dataset.</p>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">
+                        <th class="p-4 rounded-l-xl">Algorithm / Model</th>
+                        <th class="p-4">Accuracy (%)</th>
+                        <th class="p-4">Precision (%)</th>
+                        <th class="p-4">Recall (%)</th>
+                        <th class="p-4 rounded-r-xl">F1-Score (%)</th>
+                    </tr>
+                </thead>
+                <tbody id="metrics-table-body" class="divide-y divide-slate-100 text-sm">
+                    <!-- Populated via script.js -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-slate-50 rounded-2xl p-6 border border-slate-200">
+                <h3 class="text-base font-bold text-slate-800 mb-2">Why XGBoost Outperforms Others?</h3>
+                <p class="text-xs text-slate-600 leading-relaxed">
+                    Standard models like Logistic Regression struggle with non-linear feature interactions between spatial cluster IDs and weather conditions. Random Forest reduces variance via bagging, but <b>XGBoost</b> utilizes gradient boosting with regularized objective functions, capturing extreme risk boundaries and handling class imbalance effectively.
+                </p>
+            </div>
+            <div class="h-64 relative bg-white p-4 rounded-2xl border border-slate-200">
+                <canvas id="comparisonBarChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- External JavaScript Link -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

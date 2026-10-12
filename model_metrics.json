@@ -1,0 +1,20 @@
+{
+    "Logistic Regression": {
+        "Accuracy": 85.28,
+        "Precision": 72.72,
+        "Recall": 85.28,
+        "F1-Score": 78.5
+    },
+    "Random Forest": {
+        "Accuracy": 80.78,
+        "Precision": 75.48,
+        "Recall": 80.78,
+        "F1-Score": 77.78
+    },
+    "XGBoost Classifier": {
+        "Accuracy": 85.28,
+        "Precision": 72.72,
+        "Recall": 85.28,
+        "F1-Score": 78.5
+    }
+}
