@@ -146,7 +146,7 @@ function initCharts() {
                     if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Fine no high winds': 'Clear', 'Raining no high winds': 'Rain', 'Fog or mist': 'Fog', 'Snowing': 'Snow' };
-                    if (mapBack[label]) { setSeg('weather', mapBack[label]); refreshPredictor(); closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('weather', mapBack[label]); conditionsChanged('Weather set from the chart — score to see the assessment.'); closeChartModal(); switchTab('predict'); }
                 }
             }
         });
@@ -198,7 +198,7 @@ function initCharts() {
                     if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Dry': 'Dry', 'Wet or damp': 'Wet or damp', 'Frost or ice': 'Frost or ice', 'Snow': 'Snow' };
-                    if (mapBack[label]) { setSeg('surface', mapBack[label]); refreshPredictor(); closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('surface', mapBack[label]); conditionsChanged('Surface set from the chart — score to see the assessment.'); closeChartModal(); switchTab('predict'); }
                 }
             }
         });
@@ -737,15 +737,15 @@ function viewPredictionOnMap() {
     }, 250);
 }
 
-// Map -> Predict: click anywhere to score that spot
+// Map -> Predict: pick a spot and hand its coordinates to the form
 function predictHere(lat, lng) {
     setCoords(lat, lng);
     const input = document.getElementById('city-search');
     if (input) input.value = '';
     const hint = document.getElementById('city-hint');
-    if (hint) hint.innerText = 'Scoring the point you picked on the map.';
+    if (hint) hint.innerText = 'Coordinates set from the point you picked on the map.';
     switchTab('predict');
-    refreshPredictor(0);
+    conditionsChanged('The map point is set — score to see the assessment.');
 }
 
 // ---- Severity predictor: segmented controls, live scoring, comparison ----
@@ -802,7 +802,6 @@ function validatePayload(p) {
     return !bad;
 }
 
-let SCORE_TIMER = null;
 let SCORE_SEQ = 0;
 let PINNED = null;
 let CURRENT_ASSESS = null;
@@ -833,15 +832,18 @@ function clearAssessError() {
     if (el) el.remove();
 }
 
-function scheduleAutoScore(delay) {
-    clearTimeout(SCORE_TIMER);
-    SCORE_TIMER = setTimeout(runAutoScore, delay == null ? 300 : delay);
-}
-
-function runAutoScore() {
-    const payload = readFormPayload();
-    if (!validatePayload(payload)) return;
-    submitPrediction(payload);
+// The panel waits for the button: nothing the user types produces a score.
+// `note` lets the caller explain where the conditions came from.
+function showAssessPrompt(note) {
+    const panel = document.getElementById('prediction-result');
+    if (!panel) return;
+    const scored = !!CURRENT_ASSESS;
+    panel.classList.toggle('is-idle', !scored);
+    panel.classList.toggle('is-stale', scored);
+    const text = document.getElementById('assess-idle-note');
+    if (text) text.innerText = note || (scored
+        ? 'Conditions changed since this assessment — score them again to update it.'
+        : 'Set the conditions on the left, then score them to see the assessment.');
 }
 
 function setLoading(loading) {
@@ -857,25 +859,28 @@ function setLoading(loading) {
 
 async function handlePrediction(e) {
     if (e) e.preventDefault();
-    clearTimeout(SCORE_TIMER);
     const payload = readFormPayload();
     if (!validatePayload(payload)) return;
     setLoading(true);
     try {
-        await submitPrediction(payload);
-        // An explicit run is the one time we move the page for you
+        const result = await submitPrediction(payload);
+        if (!result) return;
+        // Scoring is the one thing that moves the page: take the reader to the assessment
         const panel = document.getElementById('prediction-result');
-        if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (!panel) return;
+        if (panel.focus) panel.focus({ preventScroll: true });
+        if (panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } finally {
         setLoading(false);
     }
 }
 
-// Re-read the controls and score again (used by presets, links and the chart jumps)
-function refreshPredictor(delay) {
+// Conditions were set from somewhere other than the button: a chart, the map, a shared link.
+// The readouts follow, but the assessment still waits to be asked for.
+function conditionsChanged(note) {
     updateHourReadout();
     updateMoreState();
-    scheduleAutoScore(delay);
+    showAssessPrompt(note);
 }
 
 async function submitPrediction(payload) {
@@ -930,6 +935,9 @@ function setProb(key, value) {
 
 function renderAssessment(result, payload) {
     clearAssessError();
+    // A fresh score clears the "not scored yet" and "changed since" states
+    const panel = document.getElementById('prediction-result');
+    if (panel) panel.classList.remove('is-idle', 'is-stale');
     const probs = result.probabilities || {};
     const slight = probs['Slight'] ?? probs['Slight Injury'] ?? 0;
     const serious = probs['Serious'] ?? probs['Serious Injury'] ?? 0;
@@ -1119,64 +1127,6 @@ async function copyLink() {
     }
 }
 
-// ---- Scenario presets ----
-const PRESETS = {
-    rush: {
-        city: 'London, England', lat: 51.5074, lng: -0.1278, hour: 8,
-        light: 'Daylight', weather: 'Clear', surface: 'Dry', speed_limit: '30',
-        vehicle: 'Car', age: 'Adult (26-55)', road: 'Single carriageway', junction: 'T or staggered junction'
-    },
-    motorway: {
-        city: 'Birmingham, England', lat: 52.4862, lng: -1.8904, hour: 17,
-        light: 'Daylight', weather: 'Rain', surface: 'Wet or damp', speed_limit: '70',
-        vehicle: 'Car', age: 'Adult (26-55)', road: 'Dual carriageway', junction: 'Not at junction'
-    },
-    rural: {
-        city: 'Inverness, Scotland', lat: 57.4778, lng: -4.2247, hour: 22,
-        light: 'Dark (unlit)', weather: 'Clear', surface: 'Dry', speed_limit: '60',
-        vehicle: 'Car', age: 'Adult (26-55)', road: 'Single carriageway', junction: 'Not at junction'
-    },
-    weekend: {
-        city: 'Manchester, England', lat: 53.4808, lng: -2.2426, hour: 1,
-        light: 'Dark (lit)', weather: 'Clear', surface: 'Dry', speed_limit: '20',
-        vehicle: 'Taxi', age: 'Young (16-25)', road: 'One-way / Slip road', junction: 'Crossroads'
-    }
-};
-
-let ACTIVE_PRESET = null;
-
-function markPresetButtons() {
-    document.querySelectorAll('#preset-row .preset').forEach(btn => {
-        btn.classList.toggle('is-active', btn.dataset.preset === ACTIVE_PRESET);
-    });
-}
-
-function applyPreset(name) {
-    const p = PRESETS[name];
-    if (!p) return;
-    setCoords(p.lat, p.lng);
-    const city = document.getElementById('city-search');
-    if (city) city.value = p.city;
-    const hint = document.getElementById('city-hint');
-    if (hint) hint.innerText = p.city + ' · ' + p.lat.toFixed(3) + ', ' + p.lng.toFixed(3);
-    const hourEl = document.getElementById('hour');
-    if (hourEl) hourEl.value = p.hour;
-    setSeg('light', p.light);
-    setSeg('weather', p.weather);
-    setSeg('surface', p.surface);
-    setSeg('speed_limit', p.speed_limit);
-    setSeg('age_band', p.age);
-    const veh = document.getElementById('vehicle-type');
-    if (veh) veh.value = p.vehicle;
-    const road = document.getElementById('road-type');
-    if (road) road.value = p.road;
-    const junction = document.getElementById('junction');
-    if (junction) junction.value = p.junction;
-    ACTIVE_PRESET = name;
-    markPresetButtons();
-    refreshPredictor(0);
-}
-
 // ---- Control plumbing ----
 function setCoords(lat, lng) {
     const a = document.getElementById('lat');
@@ -1216,7 +1166,7 @@ function useMyLocation() {
             const input = document.getElementById('city-search');
             if (input) input.value = '';
             if (hint) hint.innerText = 'Using your current position.';
-            refreshPredictor(0);
+            conditionsChanged('Using your current position — score to see the assessment.');
         },
         function () {
             if (hint) hint.innerText = 'Could not get your location — coordinates unchanged.';
@@ -1264,30 +1214,38 @@ function onPredictInput(e) {
         if (hourEl && t.value.indexOf('Dark') === 0 && h >= 6 && h < 18) hourEl.value = 22;
         if (hourEl && t.value === 'Daylight' && (h < 6 || h >= 18)) hourEl.value = 12;
     }
-    ACTIVE_PRESET = null;
-    markPresetButtons();
-    refreshPredictor();
+    // Keep hour and light consistent, but never score: that is the button's job
+    updateHourReadout();
+    updateMoreState();
+    showAssessPrompt();
 }
 
 function applyQueryState() {
-    if (!window.location.search) return;
+    if (!window.location.search) return false;
     let params;
-    try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
+    try { params = new URLSearchParams(window.location.search); } catch (e) { return false; }
     const has = (k) => params.has(k) && params.get(k) !== '';
-    if (has('lat') && has('lng')) setCoords(parseFloat(params.get('lat')), parseFloat(params.get('lng')));
+    let applied = false;
+    if (has('lat') && has('lng')) {
+        setCoords(parseFloat(params.get('lat')), parseFloat(params.get('lng')));
+        applied = true;
+    }
     if (has('hour')) {
         const el = document.getElementById('hour');
         if (el) el.value = params.get('hour');
+        applied = true;
     }
     [['weather', 'weather'], ['road_surface', 'surface'], ['light', 'light'],
      ['age_band', 'age_band'], ['speed_limit', 'speed_limit']].forEach(pair => {
-        if (has(pair[0])) setSeg(pair[1], params.get(pair[0]));
+        if (has(pair[0])) { setSeg(pair[1], params.get(pair[0])); applied = true; }
     });
     [['vehicle_type', 'vehicle-type'], ['road_type', 'road-type'], ['junction', 'junction']].forEach(pair => {
         if (!has(pair[0])) return;
         const el = document.getElementById(pair[1]);
         if (el) el.value = params.get(pair[0]);
+        applied = true;
     });
+    return applied;
 }
 
 function initPredictor() {
@@ -1296,13 +1254,6 @@ function initPredictor() {
         form.addEventListener('input', onPredictInput);
         form.addEventListener('change', onPredictInput);
     }
-    const presetRow = document.getElementById('preset-row');
-    if (presetRow) {
-        presetRow.addEventListener('click', (e) => {
-            const btn = e.target.closest ? e.target.closest('.preset') : null;
-            if (btn && btn.dataset.preset) applyPreset(btn.dataset.preset);
-        });
-    }
     const loc = document.getElementById('use-location');
     if (loc) loc.addEventListener('click', useMyLocation);
     const pin = document.getElementById('pin-btn');
@@ -1310,11 +1261,13 @@ function initPredictor() {
     const share = document.getElementById('share-btn');
     if (share) share.addEventListener('click', copyLink);
 
-    applyQueryState();
+    const fromLink = applyQueryState();
     updateHourReadout();
     updateMoreState();
-    markPresetButtons();
-    scheduleAutoScore(0);
+    // Nothing is scored until the button is pressed; a link only fills the form in
+    showAssessPrompt(fromLink
+        ? 'Conditions loaded from the link — score them to see the assessment.'
+        : null);
 }
 
 // Fetch served-model metrics and populate the dashboard stat cards and sidebar

@@ -202,6 +202,7 @@
         .page-head { display: flex; flex-direction: column; gap: 10px; max-width: 720px; }
         .page-head .t-display-serif-lg,
         .page-head .t-display-serif-md { margin: 2px 0 0; }
+        .page-lede { font-style: italic; }
 
         .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 
@@ -632,16 +633,6 @@
         .predict-out { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
         @media (min-width: 1100px) { .predict-out { position: sticky; top: 0; } }
 
-        .preset-row { display: flex; flex-wrap: wrap; gap: 8px; }
-        .preset {
-            background: var(--canvas); border: 1px solid var(--rule-strong); border-radius: 999px;
-            color: var(--ink); cursor: pointer; padding: 8px 14px;
-            font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2;
-            transition: border-color .15s ease, background-color .15s ease, color .15s ease;
-        }
-        .preset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); }
-        .preset.is-active { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); }
-
         .field-stack { display: flex; flex-direction: column; gap: 18px; }
         .field-row { display: flex; gap: 8px; align-items: center; }
         .field-row .field { min-width: 0; }
@@ -697,9 +688,30 @@
         .more[open] .more__chev { transform: rotate(90deg); }
         .more__state { color: var(--muted); }
 
+        .form-note { margin: 20px 0 0; line-height: 1.6; }
         .form-actions { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
 
         .assess-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+
+        /* Before the first score the panel says what to do, rather than showing a wall of dashes.
+           Once scored, changing any condition marks the result stale until it is scored again. */
+        .assess-idle { display: none; align-items: flex-start; gap: 12px; }
+        .assess-idle i { color: var(--brand); margin-top: 3px; }
+        #prediction-result.is-idle .assess-idle,
+        #prediction-result.is-stale .assess-idle { display: flex; }
+        #prediction-result.is-idle .assess-hero,
+        #prediction-result.is-idle .prob-block,
+        #prediction-result.is-idle .context-block,
+        #prediction-result.is-idle .hotspot-block,
+        #prediction-result.is-idle .assess-actions,
+        #prediction-result.is-idle .compare,
+        #prediction-result.is-idle #badge-time,
+        #prediction-result.is-idle #badge-severity,
+        #prediction-result.is-stale .assess-actions,
+        #prediction-result.is-stale .compare { display: none; }
+        #prediction-result.is-stale .assess-hero,
+        #prediction-result.is-stale .prob-block { opacity: .5; }
+        #prediction-result.is-stale .assess-idle i { color: var(--serious); }
         .assess-verdict {
             font-family: var(--font-serif); font-weight: 400; font-size: 34px; line-height: 1.12;
             letter-spacing: 0; margin: 6px 0 0;
@@ -1009,25 +1021,12 @@
                         <header class="page-head">
                             <p class="t-caption fg-muted">Severity assessment</p>
                             <h2 class="t-display-serif-md">What the conditions suggest</h2>
-                            <p class="t-body fg-muted">Set the conditions at the scene. The assessment re-scores as you change them, and shows how each condition behaves across the 2023 collision records.</p>
+                            <p class="t-body fg-muted page-lede">Evidence-led severity assessment for any road in Great Britain.</p>
                         </header>
                         <div class="rule-dashed"></div>
 
                         <div class="predict-grid">
                             <form id="prediction-form" onsubmit="handlePrediction(event)" class="predict-form">
-                                <div class="card card-pad">
-                                    <div class="section-head" style="margin-bottom:14px">
-                                        <p class="t-label-strong fg-ink" style="margin:0">Start from a scenario</p>
-                                        <span class="t-caption fg-muted">then adjust anything</span>
-                                    </div>
-                                    <div class="preset-row" id="preset-row">
-                                        <button type="button" class="preset" data-preset="rush">Urban rush hour</button>
-                                        <button type="button" class="preset" data-preset="motorway">Motorway, wet</button>
-                                        <button type="button" class="preset" data-preset="rural">Rural after dark</button>
-                                        <button type="button" class="preset" data-preset="weekend">Weekend city centre</button>
-                                    </div>
-                                </div>
-
                                 <div class="card card-pad">
                                     <div class="field-stack">
                                         <div class="field-group">
@@ -1163,6 +1162,11 @@
                                         </div>
                                     </details>
 
+                                    <p class="form-note t-caption fg-muted">
+                                        Typical scenes: a city centre at rush hour, a wet motorway,
+                                        an unlit rural road after dark.
+                                    </p>
+
                                     <div class="form-actions">
                                         <button type="submit" id="run-btn" class="btn btn-primary btn-block">
                                             <i id="run-btn-icon" class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
@@ -1173,7 +1177,7 @@
                             </form>
 
                             <aside class="predict-out">
-                                <div id="prediction-result" class="card card-pad" role="status" aria-live="polite">
+                                <div id="prediction-result" class="card card-pad is-idle" role="status" aria-live="polite" tabindex="-1">
                                     <div class="result-head">
                                         <h3 class="t-heading-sm" style="margin:0">Assessment</h3>
                                         <div class="flex items-center gap-2">
@@ -1181,6 +1185,11 @@
                                             <span id="badge-time" class="badge badge-neutral">—</span>
                                             <span id="badge-severity" class="badge badge-neutral">—</span>
                                         </div>
+                                    </div>
+
+                                    <div class="assess-idle" id="assess-idle">
+                                        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                                        <p class="t-body fg-muted" id="assess-idle-note" style="margin:0">Set the conditions on the left, then score them to see the assessment.</p>
                                     </div>
 
                                     <div class="assess-hero">
