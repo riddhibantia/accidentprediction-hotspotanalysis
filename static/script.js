@@ -3,7 +3,7 @@ const tabs = ['dashboard', 'analytics', 'predict', 'hotspots'];
 const titles = {
     dashboard: 'Overview',
     predict: 'Severity predictor',
-    hotspots: 'High-risk areas',
+    hotspots: 'Hotspot analysis',
     analytics: 'Data insights'
 };
 
@@ -41,7 +41,12 @@ function switchTab(tabId) {
 
     // Refresh Leaflet map if hotspot tab is selected
     if (tabId === 'hotspots' && window.mapInstance) {
-        setTimeout(() => { window.mapInstance.invalidateSize(); }, 200);
+        setTimeout(() => {
+            window.mapInstance.invalidateSize();
+            // The map is built while its tab is hidden, so Leaflet's first fit
+            // lands on the whole world. Re-apply the country view now it is up.
+            if (MAP_NEEDS_FIT) fitHotspotOverview();
+        }, 200);
     }
     if (window.innerWidth < 1024) closeSidebar();
 }
@@ -274,7 +279,29 @@ function initCharts() {
 // Initialize Leaflet Map for Hotspots (real DBSCAN centroids from dashboard_data.json)
 let HOTSPOT_LAYERS = [];
 let CLUSTER = null;
+let MAP_NEEDS_FIT = true;      // the map is built inside a hidden tab, so the first fit is deferred
+let SEARCH_RING = null;        // ring marking the area the search box found
+let SEARCH_ROW = null;         // the ranked row the search box is pointing at
 const RISK_COLOR = { fatal: '#b3261e', serious: '#8f5a00', slight: '#12457e' };
+const GB_FALLBACK_BOUNDS = [[50.0, -5.6], [56.3, 2.1]];   // Great Britain, used until the areas load
+
+// A Leaflet container inside a display:none tab measures zero, so the opening
+// fit has to wait until the tab is actually shown.
+function hotspotTabVisible() {
+    const tab = document.getElementById('tab-hotspots');
+    return !!tab && !tab.classList.contains('hidden');
+}
+
+// Default view: every mapped area, i.e. the country as the data covers it.
+function fitHotspotOverview() {
+    const map = window.mapInstance;
+    if (!map) return;
+    if (!hotspotTabVisible()) { MAP_NEEDS_FIT = true; return; }
+    MAP_NEEDS_FIT = false;
+    const home = window.HOTSPOT_HOME;
+    if (home && home.pad) map.fitBounds(home.pad(0.06));
+    else map.fitBounds(GB_FALLBACK_BOUNDS);
+}
 
 function initMap() {
     const mapContainer = document.getElementById('map');
@@ -358,7 +385,8 @@ function initMap() {
         });
         if (HOTSPOT_LAYERS.length) {
             const bounds = CLUSTER ? CLUSTER.getBounds() : L.featureGroup(HOTSPOT_LAYERS.map(x => x.layer)).getBounds();
-            map.fitBounds(bounds.pad(0.2));
+            window.HOTSPOT_HOME = bounds;
+            fitHotspotOverview();
         }
         updateHotspotCount(HOTSPOT_LAYERS.length, HOTSPOT_LAYERS.length);
         renderHotspotList();
@@ -503,6 +531,7 @@ function renderHotspotList() {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'hotspot-item';
+        b.dataset.idx = String(i);
         b.innerHTML = `
             <div class="row1">
                 <span class="t-label">${byWindow ? name : `${rank}. ${name}`}</span>
@@ -526,6 +555,168 @@ function renderHotspotList() {
             }
         };
         el.appendChild(b);
+    });
+}
+
+/* ---------- Area search: name a place, show it on the map ---------- */
+
+// Mapped areas first (they carry the risk numbers), then plain cities so a
+// search for somewhere with no hotspot still moves the map.
+function hotspotSearchIndex() {
+    const entries = [];
+    const seen = new Set();
+    (window.HOTSPOTS || []).forEach(hs => {
+        const label = String(hs.name || '').replace(/^near\s+/i, '').trim();
+        if (!label || seen.has(label.toLowerCase())) return;
+        seen.add(label.toLowerCase());
+        entries.push({ kind: 'area', label: label, name: hs.name || label, lat: hs.lat, lng: hs.lng, hs: hs });
+    });
+    (UK_CITIES || []).forEach(c => {
+        const label = String(c.name || '').trim();
+        if (!label || seen.has(label.toLowerCase())) return;
+        seen.add(label.toLowerCase());
+        entries.push({ kind: 'city', label: label, name: label, lat: c.lat, lng: c.lng });
+    });
+    return entries;
+}
+
+// Exact name first, then names that start with the query, then any that contain it.
+function findAreas(q) {
+    const needle = String(q || '').trim().toLowerCase();
+    if (!needle) return [];
+    const hits = [];
+    hotspotSearchIndex().forEach(e => {
+        const label = e.label.toLowerCase();
+        const at = label.indexOf(needle);
+        if (at === -1) return;
+        hits.push({ e: e, tier: label === needle ? 0 : (at === 0 ? 1 : 2) });
+    });
+    hits.sort((a, b) => a.tier - b.tier
+        || (a.e.kind === b.e.kind ? 0 : (a.e.kind === 'area' ? -1 : 1))
+        || a.e.label.length - b.e.label.length);
+    return hits.slice(0, 8).map(h => h.e);
+}
+
+function setSearchNote(text) {
+    const note = document.getElementById('hotspot-search-note');
+    if (!note) return;
+    note.hidden = !text;
+    note.innerText = text || '';
+}
+
+function clearAreaSearch(opts) {
+    if (SEARCH_RING && window.mapInstance) window.mapInstance.removeLayer(SEARCH_RING);
+    SEARCH_RING = null;
+    if (SEARCH_ROW) { SEARCH_ROW.classList.remove('is-active'); SEARCH_ROW = null; }
+    const clear = document.getElementById('hotspot-clear');
+    if (clear) clear.classList.add('hidden');
+    setSearchNote('');
+    if (!opts || !opts.keepInput) {
+        const input = document.getElementById('hotspot-q');
+        if (input) input.value = '';
+    }
+}
+
+function showArea(hit) {
+    const map = window.mapInstance;
+    if (!map || !hit) return;
+    clearAreaSearch({ keepInput: true });
+    const clear = document.getElementById('hotspot-clear');
+    if (clear) clear.classList.remove('hidden');
+
+    const target = [hit.lat, hit.lng];
+    const entry = hit.kind === 'area' ? HOTSPOT_LAYERS.find(x => x.hs === hit.hs) : null;
+
+    // Land on the area, spidering the marker out of its cluster first so its
+    // popup is actually open when we get there
+    const open = () => {
+        if (entry && entry.layer && entry.layer.openPopup) entry.layer.openPopup();
+    };
+    if (entry && CLUSTER && typeof CLUSTER.zoomToShowLayer === 'function') {
+        CLUSTER.zoomToShowLayer(entry.layer, () => {
+            map.setView(target, Math.max(map.getZoom(), 12));
+            open();
+        });
+    } else {
+        map.setView(target, 12);
+        open();
+    }
+
+    // A ring marks the spot even while the marker is still clustered
+    SEARCH_RING = L.circleMarker(target, {
+        radius: 20, color: RISK_COLOR.slight, weight: 2, opacity: 0.9,
+        fillColor: RISK_COLOR.slight, fillOpacity: 0.1
+    });
+    SEARCH_RING.addTo(map);
+
+    // Mark the ranked row when this area is in the top 10
+    if (entry && entry.idx != null) {
+        const row = document.querySelector('#hotspot-list .hotspot-item[data-idx="' + entry.idx + '"]');
+        if (row) {
+            row.classList.add('is-active');
+            SEARCH_ROW = row;
+            if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    setSearchNote(hit.kind === 'area'
+        ? `Showing ${hit.label} — ringed on the map and marked in the list.`
+        : `No mapped hotspot in ${hit.label}. The map is centred on the area.`);
+    const input = document.getElementById('hotspot-q');
+    if (input) input.value = hit.label;
+}
+
+function runAreaSearch() {
+    const input = document.getElementById('hotspot-q');
+    if (!input) return;
+    const q = input.value.trim();
+    if (!q) { clearAreaSearch(); fitHotspotOverview(); return; }
+    const hits = findAreas(q);
+    if (!hits.length) {
+        clearAreaSearch({ keepInput: true });
+        const clear = document.getElementById('hotspot-clear');
+        if (clear) clear.classList.remove('hidden');
+        setSearchNote(`No area or city matched “${q}”.`);
+        return;
+    }
+    showArea(hits[0]);
+}
+
+function refreshAreaSuggestions() {
+    const list = document.getElementById('hotspot-suggest');
+    const input = document.getElementById('hotspot-q');
+    if (!list || !input) return;
+    const q = input.value.trim();
+    list.innerHTML = '';
+    if (q.length < 2) return;
+    findAreas(q).forEach(hit => {
+        const opt = document.createElement('option');
+        opt.value = hit.label;
+        opt.label = hit.kind === 'area' ? 'Mapped hotspot' : 'City';
+        list.appendChild(opt);
+    });
+}
+
+function initAreaSearch() {
+    const input = document.getElementById('hotspot-q');
+    if (!input) return;
+    input.addEventListener('input', refreshAreaSuggestions);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); runAreaSearch(); }
+        else if (e.key === 'Escape') { clearAreaSearch(); fitHotspotOverview(); input.blur(); }
+    });
+    // `change` fires when a suggestion is picked, but also on blur. Only act on
+    // an exact name, so clicking away mid-word does not fling the map.
+    input.addEventListener('change', () => {
+        const typed = input.value.trim().toLowerCase();
+        if (!typed) return;
+        if (findAreas(input.value).some(h => h.label.toLowerCase() === typed)) runAreaSearch();
+    });
+    const clear = document.getElementById('hotspot-clear');
+    if (clear) clear.addEventListener('click', () => {
+        clearAreaSearch();
+        fitHotspotOverview();
+        input.focus();
     });
 }
 
@@ -1430,7 +1621,6 @@ function renderLandingDial(data) {
 function dismissLanding(instant) {
     const landing = document.getElementById('landing');
     if (!landing || landing.hidden) return;
-    try { sessionStorage.setItem('roadsafe-entered', '1'); } catch (e) {}
     if (LANDING_CYCLE) { clearInterval(LANDING_CYCLE); LANDING_CYCLE = null; }
     const finish = () => {
         landing.hidden = true;
@@ -1452,11 +1642,7 @@ function initLanding() {
     const startBtn = document.getElementById('landing-start');
     const skipBtn = document.getElementById('landing-skip');
 
-    let seen = false;
-    try { seen = sessionStorage.getItem('roadsafe-entered') === '1'; } catch (e) {}
-    const deepLink = /#(dashboard|analytics|predict|hotspots)/.test(window.location.hash);
-    if (seen || deepLink) { dismissLanding(true); return; }
-
+    // Shown on every load, so a refresh always starts here
     landing.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { dismissLanding(); return; }
         if (e.key !== 'Tab') return;
@@ -1503,6 +1689,7 @@ window.onload = function() {
     initCharts();
     initMap();
     initChartModal();
+    initAreaSearch();
     loadModelMetrics();
     // The predictor needs the city list before it can apply a shared link
     loadCities().then(initPredictor);

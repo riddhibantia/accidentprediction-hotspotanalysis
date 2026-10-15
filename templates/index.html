@@ -335,6 +335,27 @@
         .hotspot-shell { display: flex; flex-direction: column; height: calc(100vh - 13rem); min-height: 560px; }
         .hotspot-body { flex: 1; min-height: 0; margin-top: 18px; display: flex; flex-direction: column; gap: 16px; }
         @media (min-width: 1024px) { .hotspot-body { flex-direction: row; } }
+        .hotspot-search {
+            display: flex; align-items: center; gap: 10px; margin-top: 16px;
+            padding: 9px 12px; background: var(--canvas);
+            border: 1px solid var(--rule-strong); border-radius: var(--r-ctl);
+        }
+        .hotspot-search:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+        .hotspot-search > i { color: var(--muted); font-size: 14px; }
+        .hotspot-search input {
+            flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink);
+            font-family: var(--font-sans); font-size: 15px; line-height: 1.4;
+        }
+        .hotspot-search input:focus { outline: none; }
+        .hotspot-search input::placeholder { color: var(--muted); }
+        .hotspot-search__clear {
+            display: inline-flex; align-items: center; padding: 2px 6px;
+            border: 0; background: transparent; color: var(--muted);
+            font-size: 14px; line-height: 1; cursor: pointer;
+        }
+        .hotspot-search__clear.hidden { display: none; }
+        .hotspot-search__clear:hover { color: var(--ink); }
+        #hotspot-search-note { margin: 8px 2px 0; }
         .hotspot-list { flex: 0 0 auto; background: var(--canvas); border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px; overflow-y: auto; max-height: 260px; }
         @media (min-width: 1024px) { .hotspot-list { width: 288px; flex: 0 0 288px; max-height: none; } }
         .hotspot-item {
@@ -739,7 +760,7 @@
            ============================================================ */
         .print-only { display: none; }
         @media print {
-            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop, .landing { display: none !important; }
+            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop, .landing, .hotspot-search, #hotspot-search-note { display: none !important; }
             .app { display: block; height: auto; width: auto; overflow: visible; }
             .main, .page { display: block; height: auto; overflow: visible; }
             .page-inner { max-width: none; padding: 0; gap: 14px; }
@@ -818,7 +839,7 @@
                     <i class="fa-solid fa-car-burst"></i><span>Severity predictor</span>
                 </button>
                 <button type="button" onclick="switchTab('hotspots')" id="nav-hotspots" class="rail-link t-label-strong">
-                    <i class="fa-solid fa-map-location-dot"></i><span>High-risk areas</span>
+                    <i class="fa-solid fa-map-location-dot"></i><span>Hotspot analysis</span>
                 </button>
             </nav>
 
@@ -1223,9 +1244,9 @@
                         <div class="card card-pad hotspot-shell">
                             <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4" style="border-bottom:1px solid var(--rule)">
                                 <header class="page-head" style="max-width:640px">
-                                    <p class="t-caption fg-muted">High-risk areas</p>
+                                    <p class="t-caption fg-muted">Hotspot analysis</p>
                                     <h2 class="t-display-serif-md">Where the risk concentrates</h2>
-                                    <p class="t-body fg-muted">Areas where serious and fatal collisions cluster. Click any area on the map, or in the list, to zoom in.</p>
+                                    <p class="t-body fg-muted">Areas where serious and fatal collisions cluster. Search for a place, or click any area on the map or in the list, to zoom in.</p>
                                 </header>
                                 <div class="flex flex-col sm:items-end gap-3">
                                     <span id="hotspot-count" class="t-caption fg-muted"></span>
@@ -1244,6 +1265,19 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="hotspot-search">
+                                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                                <input id="hotspot-q" type="text" list="hotspot-suggest" autocomplete="off"
+                                       spellcheck="false" placeholder="Find an area or city — London, Manchester, Glasgow…"
+                                       aria-label="Find an area or city on the map">
+                                <button type="button" id="hotspot-clear" class="hotspot-search__clear hidden"
+                                        aria-label="Clear the search and show the whole country">
+                                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                </button>
+                                <datalist id="hotspot-suggest"></datalist>
+                            </div>
+                            <p id="hotspot-search-note" class="t-caption fg-muted" role="status" hidden></p>
 
                             <div class="hotspot-body">
                                 <div class="hotspot-list">
