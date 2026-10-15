@@ -600,8 +600,25 @@ function findAreas(q) {
 function setSearchNote(text) {
     const note = document.getElementById('hotspot-search-note');
     if (!note) return;
+    const was = !note.hidden;
     note.hidden = !text;
     note.innerText = text || '';
+    // The note changes the map's height, which Leaflet does not notice by itself
+    if (was !== !note.hidden && window.mapInstance) {
+        setTimeout(() => window.mapInstance.invalidateSize(), 0);
+    }
+}
+
+function showSearchClear() {
+    const clear = document.getElementById('hotspot-clear');
+    if (clear) clear.classList.remove('hidden');
+}
+
+function closeAreaMatches() {
+    const box = document.getElementById('hotspot-matches');
+    if (!box) return;
+    box.hidden = true;
+    box.innerHTML = '';
 }
 
 function clearAreaSearch(opts) {
@@ -621,8 +638,7 @@ function showArea(hit) {
     const map = window.mapInstance;
     if (!map || !hit) return;
     clearAreaSearch({ keepInput: true });
-    const clear = document.getElementById('hotspot-clear');
-    if (clear) clear.classList.remove('hidden');
+    showSearchClear();
 
     const target = [hit.lat, hit.lng];
     const entry = hit.kind === 'area' ? HOTSPOT_LAYERS.find(x => x.hs === hit.hs) : null;
@@ -670,53 +686,70 @@ function runAreaSearch() {
     const input = document.getElementById('hotspot-q');
     if (!input) return;
     const q = input.value.trim();
+    closeAreaMatches();
     if (!q) { clearAreaSearch(); fitHotspotOverview(); return; }
     const hits = findAreas(q);
     if (!hits.length) {
         clearAreaSearch({ keepInput: true });
-        const clear = document.getElementById('hotspot-clear');
-        if (clear) clear.classList.remove('hidden');
-        setSearchNote(`No area or city matched “${q}”.`);
+        showSearchClear();
+        setSearchNote('No area or city matched “' + q + '”.');
         return;
     }
     showArea(hits[0]);
 }
 
-function refreshAreaSuggestions() {
-    const list = document.getElementById('hotspot-suggest');
+// The pick-list under the box: every match is a button, so one click gets there
+function showAreaMatches() {
+    const box = document.getElementById('hotspot-matches');
     const input = document.getElementById('hotspot-q');
-    if (!list || !input) return;
+    if (!box || !input) return;
     const q = input.value.trim();
-    list.innerHTML = '';
-    if (q.length < 2) return;
-    findAreas(q).forEach(hit => {
-        const opt = document.createElement('option');
-        opt.value = hit.label;
-        opt.label = hit.kind === 'area' ? 'Mapped hotspot' : 'City';
-        list.appendChild(opt);
+    if (q.length < 2) { closeAreaMatches(); return; }
+    const hits = findAreas(q);
+    if (!hits.length) { closeAreaMatches(); return; }
+    box.innerHTML = '';
+    hits.forEach(hit => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'hotspot-match';
+        b.innerHTML = '<span>' + esc(hit.label) + '</span>'
+            + '<span class="hotspot-match__kind">'
+            + (hit.kind === 'area' ? 'Mapped hotspot' : 'City') + '</span>';
+        b.addEventListener('click', () => { showArea(hit); closeAreaMatches(); });
+        box.appendChild(b);
     });
+    box.hidden = false;
 }
 
 function initAreaSearch() {
     const input = document.getElementById('hotspot-q');
     if (!input) return;
-    input.addEventListener('input', refreshAreaSuggestions);
+    input.addEventListener('input', showAreaMatches);
+    input.addEventListener('focus', showAreaMatches);
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); runAreaSearch(); }
-        else if (e.key === 'Escape') { clearAreaSearch(); fitHotspotOverview(); input.blur(); }
+        else if (e.key === 'Escape') {
+            closeAreaMatches();
+            clearAreaSearch();
+            fitHotspotOverview();
+            input.blur();
+        }
     });
-    // `change` fires when a suggestion is picked, but also on blur. Only act on
-    // an exact name, so clicking away mid-word does not fling the map.
-    input.addEventListener('change', () => {
-        const typed = input.value.trim().toLowerCase();
-        if (!typed) return;
-        if (findAreas(input.value).some(h => h.label.toLowerCase() === typed)) runAreaSearch();
-    });
+    const go = document.getElementById('hotspot-go');
+    if (go) go.addEventListener('click', runAreaSearch);
     const clear = document.getElementById('hotspot-clear');
     if (clear) clear.addEventListener('click', () => {
+        closeAreaMatches();
         clearAreaSearch();
         fitHotspotOverview();
         input.focus();
+    });
+    // A click anywhere outside the box puts the pick-list away
+    document.addEventListener('click', (e) => {
+        const box = document.getElementById('hotspot-matches');
+        if (!box || box.hidden) return;
+        if (e.target === input || box.contains(e.target)) return;
+        closeAreaMatches();
     });
 }
 
@@ -740,8 +773,8 @@ function viewPredictionOnMap() {
 // Map -> Predict: pick a spot and hand its coordinates to the form
 function predictHere(lat, lng) {
     setCoords(lat, lng);
-    const input = document.getElementById('city-search');
-    if (input) input.value = '';
+    const select = document.getElementById('city-select');
+    if (select) select.value = '';
     const hint = document.getElementById('city-hint');
     if (hint) hint.innerText = 'Coordinates set from the point you picked on the map.';
     switchTab('predict');
@@ -1135,24 +1168,6 @@ function setCoords(lat, lng) {
     if (b) b.value = Number(lng).toFixed(4);
 }
 
-function matchCity() {
-    const input = document.getElementById('city-search');
-    const hint = document.getElementById('city-hint');
-    if (!input) return;
-    const q = input.value.trim().toLowerCase();
-    if (!q) return;
-    const hit = UK_CITIES.find(c => c.name.toLowerCase() === q)
-        || UK_CITIES.find(c => c.name.toLowerCase().indexOf(q) === 0)
-        || UK_CITIES.find(c => c.name.toLowerCase().indexOf(q) >= 0);
-    if (hit) {
-        setCoords(hit.lat, hit.lng);
-        input.value = hit.name;
-        if (hint) hint.innerText = hit.name + ' · ' + hit.lat.toFixed(3) + ', ' + hit.lng.toFixed(3);
-    } else if (hint) {
-        hint.innerText = 'No match — coordinates left unchanged.';
-    }
-}
-
 function useMyLocation() {
     const hint = document.getElementById('city-hint');
     if (!navigator.geolocation) {
@@ -1163,8 +1178,8 @@ function useMyLocation() {
     navigator.geolocation.getCurrentPosition(
         function (pos) {
             setCoords(pos.coords.latitude, pos.coords.longitude);
-            const input = document.getElementById('city-search');
-            if (input) input.value = '';
+            const select = document.getElementById('city-select');
+            if (select) select.value = '';
             if (hint) hint.innerText = 'Using your current position.';
             conditionsChanged('Using your current position — score to see the assessment.');
         },
@@ -1262,6 +1277,7 @@ function initPredictor() {
     if (share) share.addEventListener('click', copyLink);
 
     const fromLink = applyQueryState();
+    syncCitySelect();
     updateHourReadout();
     updateMoreState();
     // Nothing is scored until the button is pressed; a link only fills the form in
@@ -1309,13 +1325,12 @@ async function loadModelMetrics() {
     }
 }
 
-// Load UK cities into the searchable datalist, fill coordinates from a match
+// Load the UK city list into the dropdown; picking a city fills the coordinates
 let UK_CITIES = [];
 
 async function loadCities() {
-    const input = document.getElementById('city-search');
-    const list = document.getElementById('city-list');
-    if (!input) return;
+    const select = document.getElementById('city-select');
+    if (!select) return;
 
     try {
         const response = await fetch('/static/uk_cities.json');
@@ -1332,26 +1347,49 @@ async function loadCities() {
         ];
     }
 
-    if (list) {
-        list.innerHTML = '';
-        UK_CITIES.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c.name;
-            list.appendChild(opt);
-        });
-    }
+    UK_CITIES.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.name;
+        opt.textContent = c.name;
+        select.appendChild(opt);
+    });
+    select.addEventListener('change', onCityPicked);
 
-    input.addEventListener('change', matchCity);
-
-    if (!input.value) {
-        const london = UK_CITIES.find(c => c.name.indexOf('London') === 0) || UK_CITIES[0];
-        if (london) {
-            input.value = london.name;
-            setCoords(london.lat, london.lng);
-            const hint = document.getElementById('city-hint');
-            if (hint) hint.innerText = london.name + ' · ' + london.lat.toFixed(3) + ', ' + london.lng.toFixed(3);
-        }
+    // Open on London; a shared link overwrites this in initPredictor
+    const london = UK_CITIES.find(c => c.name.indexOf('London') === 0) || UK_CITIES[0];
+    if (london) {
+        select.value = london.name;
+        onCityPicked();
     }
+}
+
+// Picking a city fills the coordinates in. They stay editable afterwards.
+function onCityPicked() {
+    const select = document.getElementById('city-select');
+    const hint = document.getElementById('city-hint');
+    if (!select) return;
+    const city = UK_CITIES.find(c => c.name === select.value);
+    if (!city) {
+        if (hint) hint.innerText = 'Coordinates set by hand.';
+        return;
+    }
+    setCoords(city.lat, city.lng);
+    if (hint) hint.innerText = city.name + ' · ' + city.lat.toFixed(4) + ', ' + city.lng.toFixed(4);
+}
+
+// Point the dropdown at whichever city the coordinates are sitting on, if any
+function syncCitySelect() {
+    const select = document.getElementById('city-select');
+    if (!select) return;
+    const latEl = document.getElementById('lat');
+    const lngEl = document.getElementById('lng');
+    const lat = parseFloat(latEl ? latEl.value : '');
+    const lng = parseFloat(lngEl ? lngEl.value : '');
+    const hit = UK_CITIES.find(c => Math.abs(c.lat - lat) < 0.002 && Math.abs(c.lng - lng) < 0.002);
+    select.value = hit ? hit.name : '';
+    const hint = document.getElementById('city-hint');
+    if (hit) onCityPicked();
+    else if (hint) hint.innerText = 'Coordinates set by hand.';
 }
 
 // ---- Data insights: enlarge a chart card into a readable overlay ----

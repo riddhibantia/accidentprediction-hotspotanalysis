@@ -330,6 +330,7 @@
         .hotspot-body { flex: 1; min-height: 0; margin-top: 18px; display: flex; flex-direction: column; gap: 16px; }
         @media (min-width: 1024px) { .hotspot-body { flex-direction: row; } }
         .hotspot-search {
+            position: relative;
             display: flex; align-items: center; gap: 10px; margin-top: 16px;
             padding: 9px 12px; background: var(--canvas);
             border: 1px solid var(--rule-strong); border-radius: var(--r-ctl);
@@ -349,6 +350,25 @@
         }
         .hotspot-search__clear.hidden { display: none; }
         .hotspot-search__clear:hover { color: var(--ink); }
+        /* Live pick-list: one click and the map goes there. It floats over the
+           map rather than pushing it down, so Leaflet never has to re-measure. */
+        .hotspot-matches {
+            position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+            padding: 4px; max-height: 248px; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 2px;
+            background: var(--paper); border: 1px solid var(--rule);
+            border-radius: var(--r-card); box-shadow: var(--shadow);
+        }
+        .hotspot-matches[hidden] { display: none; }
+        .hotspot-match {
+            display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+            width: 100%; text-align: left; cursor: pointer;
+            padding: 9px 11px; border: 0; border-radius: var(--r-ctl);
+            background: transparent; color: var(--ink);
+            font-family: var(--font-sans); font-size: 14px; line-height: 1.3;
+        }
+        .hotspot-match:hover, .hotspot-match:focus-visible { background: var(--canvas); }
+        .hotspot-match__kind { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
         #hotspot-search-note { margin: 8px 2px 0; }
         .hotspot-list { flex: 0 0 auto; background: var(--canvas); border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px; overflow-y: auto; max-height: 260px; }
         @media (min-width: 1024px) { .hotspot-list { width: 288px; flex: 0 0 288px; max-height: none; } }
@@ -775,7 +795,7 @@
            ============================================================ */
         .print-only { display: none; }
         @media print {
-            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop, .landing, .hotspot-search, #hotspot-search-note { display: none !important; }
+            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop, .landing, .hotspot-search, #hotspot-matches, #hotspot-search-note { display: none !important; }
             .app { display: block; height: auto; width: auto; overflow: visible; }
             .main, .page { display: block; height: auto; overflow: visible; }
             .page-inner { max-width: none; padding: 0; gap: 14px; }
@@ -1030,22 +1050,23 @@
                                 <div class="card card-pad">
                                     <div class="field-stack">
                                         <div class="field-group">
-                                            <label class="field-label" for="city-search">City or area</label>
+                                            <label class="field-label" for="city-select">City or area</label>
                                             <div class="field-row">
-                                                <input type="text" id="city-search" list="city-list" class="field" placeholder="Start typing a town or city" autocomplete="off">
-                                                <datalist id="city-list"></datalist>
+                                                <select id="city-select" class="field">
+                                                    <option value="">Choose a city…</option>
+                                                </select>
                                                 <button type="button" id="use-location" class="btn btn-ghost btn-compact" title="Use my current location">
                                                     <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i><span>Here</span>
                                                 </button>
                                             </div>
-                                            <p class="field-hint" id="city-hint">Coordinates fill in from the nearest match.</p>
+                                            <p class="field-hint" id="city-hint">Coordinates fill in from the city you pick.</p>
                                         </div>
 
                                         <div class="field-group">
                                             <span class="field-label" id="lbl-coords">Coordinates</span>
                                             <div class="field-row">
-                                                <input type="number" step="any" id="lat" value="51.5074" class="field" aria-label="Latitude" aria-labelledby="lbl-coords">
-                                                <input type="number" step="any" id="lng" value="-0.1278" class="field" aria-label="Longitude" aria-labelledby="lbl-coords">
+                                                <input type="number" step="any" id="lat" value="51.5099" class="field" aria-label="Latitude" aria-labelledby="lbl-coords">
+                                                <input type="number" step="any" id="lng" value="-0.1181" class="field" aria-label="Longitude" aria-labelledby="lbl-coords">
                                             </div>
                                             <p id="coords-error" class="field-error hidden">Latitude -90 to 90, longitude -180 to 180.</p>
                                         </div>
@@ -1285,14 +1306,15 @@
 
                             <div class="hotspot-search">
                                 <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                                <input id="hotspot-q" type="text" list="hotspot-suggest" autocomplete="off"
-                                       spellcheck="false" placeholder="Find an area or city — London, Manchester, Glasgow…"
-                                       aria-label="Find an area or city on the map">
+                                <input id="hotspot-q" type="text" autocomplete="off" spellcheck="false"
+                                       placeholder="Search a city or area — London, Manchester, Glasgow…"
+                                       aria-label="Search for a city or area on the map">
                                 <button type="button" id="hotspot-clear" class="hotspot-search__clear hidden"
                                         aria-label="Clear the search and show the whole country">
                                     <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                                 </button>
-                                <datalist id="hotspot-suggest"></datalist>
+                                <button type="button" id="hotspot-go" class="btn btn-primary btn-compact">Search</button>
+                                <div id="hotspot-matches" class="hotspot-matches" hidden></div>
                             </div>
                             <p id="hotspot-search-note" class="t-caption fg-muted" role="status" hidden></p>
 
