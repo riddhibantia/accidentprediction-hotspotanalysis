@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Accident severity prediction and high-risk road-area analysis for Great Britain, built on the DfT STATS19 2023 collision records.">
-    <title>RoadSafe Analytics — UK road safety analysis</title>
+    <title>RoadSafe — UK road safety analysis</title>
 
     <!-- Tailwind: layout utilities only (colour and type come from the token layer below) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -53,13 +53,6 @@
             --r-card: 8px;
             --r-ctl: 6px;
             --shadow: 0 1px 2px rgba(20, 24, 29, .05);
-
-            /* Landing only: it is always the night-road panel */
-            --landing-ink: #e8eaed;
-            --landing-soft: #cdd5dd;
-            --landing-dim: #98a2ad;
-            --landing-faint: #6b7580;
-            --landing-accent: #6ba3dd;
         }
         html.dark {
             --ink: #e8eaed;
@@ -529,92 +522,102 @@
         .loc-item .meta { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 3px; }
 
         /* ============================================================
-           Landing: the night-road front door
+           Landing: the front door, in the console's own palette
            ============================================================ */
         .landing {
             position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
-            background: radial-gradient(125% 95% at 50% 0%, #16202b 0%, #0e1116 58%, #090c10 100%);
-            color: var(--landing-ink); overflow: hidden;
+            background: var(--canvas); color: var(--ink); overflow: hidden;
             transition: opacity .45s ease, transform .45s ease;
         }
         .landing[hidden] { display: none; }
         .landing.is-leaving { opacity: 0; transform: scale(1.015); pointer-events: none; }
 
-        /* Drifting lane markings: the centre-line rule, at road scale */
+        /* Drifting lane markings, drawn in the app's own hairline colours */
         .landing__lanes { position: absolute; inset: -30%; pointer-events: none; }
         .landing__lanes::before,
         .landing__lanes::after {
             content: ''; position: absolute; inset: 0;
             background-image: repeating-linear-gradient(112deg,
-                rgba(255, 255, 255, .065) 0 2px, transparent 2px 40px);
-            animation: laneDrift 38s linear infinite;
+                var(--rule-strong) 0 2px, transparent 2px 46px);
+            animation: laneDrift 40s linear infinite;
         }
         .landing__lanes::after {
             background-image: repeating-linear-gradient(112deg,
-                rgba(107, 163, 221, .11) 0 2px, transparent 2px 132px);
-            animation-duration: 64s; animation-direction: reverse;
+                var(--rule) 0 2px, transparent 2px 138px);
+            animation-duration: 66s; animation-direction: reverse;
         }
         @keyframes laneDrift { to { background-position: 1400px 0; } }
+        .landing__wash {
+            position: absolute; inset: 0; pointer-events: none;
+            background: radial-gradient(115% 85% at 84% 4%, var(--brand-tint) 0%, transparent 62%);
+        }
 
         .landing__top {
             position: relative; z-index: 2; flex: 0 0 auto;
-            height: 68px; padding: 0 28px; display: flex; align-items: center;
+            height: 64px; padding: 0 28px; display: flex; align-items: center;
             justify-content: space-between; gap: 16px;
+            border-bottom: 1px solid var(--rule);
         }
-        .landing__brand { display: inline-flex; align-items: center; gap: 11px; color: var(--landing-ink); }
+        .landing__brand { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); }
         .landing__mark {
-            width: 32px; height: 32px; border-radius: 7px; flex: 0 0 auto;
-            background: var(--landing-accent); color: #0b1015;
+            width: 34px; height: 34px; border-radius: 7px; flex: 0 0 auto;
+            background: var(--brand); color: #fff;
             display: inline-flex; align-items: center; justify-content: center;
         }
         .landing__skip {
             background: transparent; border: 0; cursor: pointer; padding: 8px 4px;
-            color: var(--landing-dim); font-family: var(--font-sans); font-size: 13px;
+            color: var(--muted); font-family: var(--font-sans); font-size: 13px;
         }
-        .landing__skip:hover { color: var(--landing-ink); }
+        .landing__skip:hover { color: var(--ink); }
 
         .landing__wrap {
             position: relative; z-index: 2; flex: 1; min-height: 0; overflow-y: auto;
             width: 100%; max-width: 1180px; margin: 0 auto;
             display: grid; grid-template-columns: minmax(0, 1fr); align-content: center;
-            gap: 36px; padding: 20px 28px 56px;
+            gap: 36px; padding: 24px 28px 56px;
         }
         @media (min-width: 1024px) {
             .landing__wrap {
-                grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
-                align-items: center; gap: 48px; padding: 20px 40px 72px;
+                grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+                align-items: center; gap: 56px; padding: 24px 40px 72px;
             }
         }
         .landing__copy { display: flex; flex-direction: column; gap: 16px; max-width: 620px; }
-        .landing__eyebrow { color: var(--landing-dim); margin: 0; }
-        .landing__name { color: #fff; margin: 0; }
-        .landing__lede { color: var(--landing-soft); margin: 0; }
+        .landing__eyebrow { color: var(--muted); margin: 0; }
+        .landing__name { color: var(--ink); margin: 0; }
+        .landing__lede { color: var(--ink); margin: 0; }
         /* Only the outgoing word leaves the flow, so each phrase sets its own width */
         .landing__cycle {
             position: relative; display: inline-block; overflow: hidden;
             height: 1.375em; vertical-align: bottom;
         }
-        .landing__cycle-word { display: inline-block; white-space: nowrap; color: var(--landing-accent); }
+        .landing__cycle-word { display: inline-block; white-space: nowrap; color: var(--brand); }
         .landing__cycle-word.is-in { animation: cycleIn .42s ease; }
         .landing__cycle-word.is-out { position: absolute; left: 0; top: 0; animation: cycleOut .42s ease forwards; }
         @keyframes cycleIn { from { transform: translateY(115%); opacity: 0; } }
         @keyframes cycleOut { to { transform: translateY(-115%); opacity: 0; } }
-        .landing__sub { color: var(--landing-dim); margin: 0; max-width: 54ch; }
-        .landing__go {
-            align-self: flex-start; margin-top: 6px;
-            display: inline-flex; align-items: center; gap: 12px;
-            background: var(--landing-accent); color: #0b1015; border: 0; cursor: pointer;
-            font-family: var(--font-sans); font-weight: 600; font-size: 15px; line-height: 1.2;
-            padding: 15px 22px; border-radius: var(--r-ctl);
-            transition: background-color .18s ease, gap .18s ease;
-        }
-        .landing__go:hover { background: #9cc6ee; gap: 16px; }
-        .landing__go:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-        .landing__fine { color: var(--landing-faint); margin: 0; }
+        .landing__sub { color: var(--muted); margin: 0; max-width: 54ch; }
+        .landing__go { align-self: flex-start; margin-top: 6px; gap: 12px; padding: 15px 20px; font-size: 15px; }
+        .landing__go i { transition: transform .18s ease; }
+        .landing__go:hover i { transform: translateX(5px); }
+        .landing__fine { color: var(--muted); margin: 0; }
 
-        .landing__dial { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-        .landing__dial svg { width: min(370px, 76vw); height: auto; overflow: visible; }
-        .landing__dial-cap { color: var(--landing-faint); text-align: center; }
+        /* The dial is a card, like every other chart on the site */
+        .landing__dial {
+            margin: 0; padding: 20px 22px 16px;
+            background: var(--paper); border: 1px solid var(--rule);
+            border-radius: var(--r-card); box-shadow: var(--shadow);
+            display: flex; flex-direction: column; align-items: center; gap: 12px;
+        }
+        .landing__dial-head { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+        .landing__dial-head .t-caption { color: var(--muted); }
+        .landing__dial svg { width: min(330px, 100%); height: auto; overflow: visible; }
+        .landing__dial-cap { color: var(--muted); text-align: center; margin: 0; }
+
+        /* Each window is selectable: hover or focus to preview, click to pin */
+        .dial-arc { cursor: pointer; opacity: .55; transition: opacity .18s ease; }
+        .dial-arc:hover, .dial-arc:focus-visible, .dial-arc.is-active { opacity: 1; }
+        .dial-arc:focus { outline: none; }
         .dial-sweep { transform-origin: 160px 160px; animation: dialSweep 48s linear infinite; }
         @keyframes dialSweep { to { transform: rotate(360deg); } }
 
@@ -778,11 +781,12 @@
     <!-- ===================== LANDING ===================== -->
     <div id="landing" class="landing" role="dialog" aria-modal="true" aria-labelledby="landing-name">
         <div class="landing__lanes" aria-hidden="true"></div>
+        <div class="landing__wash" aria-hidden="true"></div>
 
         <div class="landing__top">
             <span class="landing__brand">
                 <span class="landing__mark"><i class="fa-solid fa-road" aria-hidden="true"></i></span>
-                <span class="t-label-strong">RoadSafe Analytics</span>
+                <span class="t-label-strong">RoadSafe</span>
             </span>
             <button type="button" class="landing__skip" id="landing-skip">Skip to dashboard</button>
         </div>
@@ -790,16 +794,16 @@
         <div class="landing__wrap">
             <div class="landing__copy">
                 <p class="landing__eyebrow t-caption">DfT STATS19 · Great Britain · 2023</p>
-                <h1 id="landing-name" class="landing__name t-display-serif-xl">RoadSafe Analytics</h1>
+                <h1 id="landing-name" class="landing__name t-display-serif-xl">RoadSafe</h1>
                 <p class="landing__lede t-display-sans-md">
                     Collision risk, mapped
                     <span class="landing__cycle" id="landing-cycle"><span class="landing__cycle-word">hour by hour</span></span>
                 </p>
                 <p class="landing__sub t-body-loose">
-                    Severity assessment and high-risk area analysis for Great Britain,
+                    Severity assessment and hotspot analysis for Great Britain,
                     built from all 104,246 recorded collisions of 2023.
                 </p>
-                <button type="button" class="landing__go" id="landing-start">
+                <button type="button" class="btn btn-primary landing__go" id="landing-start">
                     <span>Open the console</span>
                     <i class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
                 </button>
@@ -807,8 +811,12 @@
             </div>
 
             <figure class="landing__dial">
+                <div class="landing__dial-head">
+                    <span class="t-label-strong">When risk peaks</span>
+                    <span class="t-caption">3-hour windows</span>
+                </div>
                 <svg id="landing-dial" viewBox="0 0 320 320" role="img" aria-labelledby="landing-dial-title">
-                    <title id="landing-dial-title">Serious-or-fatal share of recorded collisions, by three-hour window</title>
+                    <title id="landing-dial-title">Serious-or-fatal share of recorded collisions by three-hour window. Each window can be selected.</title>
                 </svg>
                 <figcaption class="landing__dial-cap t-caption" id="landing-dial-cap">Serious or fatal share, by three-hour window</figcaption>
             </figure>
@@ -822,7 +830,7 @@
             <div class="rail-brand">
                 <span class="rail-mark"><i class="fa-solid fa-road"></i></span>
                 <div>
-                    <span class="rail-name t-heading-md">RoadSafe Analytics</span>
+                    <span class="rail-name t-heading-md">RoadSafe</span>
                     <span class="rail-sub t-caption">UK road safety analysis</span>
                 </div>
             </div>

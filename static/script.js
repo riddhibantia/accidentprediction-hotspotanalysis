@@ -1526,7 +1526,6 @@ const DIAL_BINS = [
     ['12 AM', '00:00–03:00'], ['3 AM', '03:00–06:00'], ['6 AM', '06:00–09:00'], ['9 AM', '09:00–12:00'],
     ['12 PM', '12:00–15:00'], ['3 PM', '15:00–18:00'], ['6 PM', '18:00–21:00'], ['9 PM', '21:00–24:00']
 ];
-const DIAL_TIER = ['#5fb98a', '#d7a154', '#e2796f'];
 
 function drawIn(path, index) {
     if (typeof path.getTotalLength !== 'function' || typeof requestAnimationFrame !== 'function') return;
@@ -1539,12 +1538,29 @@ function drawIn(path, index) {
     requestAnimationFrame(() => { path.style.strokeDashoffset = 0; });
 }
 
+// Serious-or-fatal share for each 3-hour window, straight from the real data.
+// Windows are selectable: hover or focus previews one, click pins it.
 function renderLandingDial(data) {
     const svg = document.getElementById('landing-dial');
     if (!svg) return;
     Array.prototype.slice.call(svg.querySelectorAll('g')).forEach(node => node.remove());
     const g = svgEl('g', {});
     svg.appendChild(g);
+
+    // Read the palette off the document so the dial follows the theme
+    const css = (name, fallback) => {
+        let v = '';
+        try { v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); } catch (e) {}
+        return v || fallback;
+    };
+    const tone = {
+        rim: css('--rule', '#dcdfe3'),
+        tick: css('--rule-strong', '#c4c9cf'),
+        brand: css('--brand', '#12457e'),
+        ink: css('--ink', '#14181d'),
+        muted: css('--muted', '#5f6873'),
+        tier: [css('--slight', '#1f7a4d'), css('--serious', '#8f5a00'), css('--fatal', '#b3261e')]
+    };
 
     const cx = 160, cy = 160, rInner = 97, wMin = 10, wMax = 33;
     const hourSev = (data && data.hour_severity) ? data.hour_severity : null;
@@ -1556,11 +1572,48 @@ function renderLandingDial(data) {
     const lo = Math.min.apply(null, values);
     const hi = Math.max.apply(null, values);
     const span = (hi - lo) || 1;
+    const base = (data && data.totals && data.totals.high_sev_pct != null) ? data.totals.high_sev_pct : null;
 
     g.appendChild(svgEl('circle', {
         cx: cx, cy: cy, r: rInner + wMax / 2, fill: 'none',
-        stroke: '#1d242c', 'stroke-width': wMax
+        stroke: tone.rim, 'stroke-width': wMax
     }));
+
+    const centre = (offsetY, text, size, fill, weight) => {
+        const t = svgEl('text', {
+            x: cx, y: cy + offsetY, 'text-anchor': 'middle', fill: fill,
+            'font-size': size, 'font-family': 'Inter, system-ui, sans-serif',
+            'font-weight': weight || 400,
+            style: 'font-variant-numeric: tabular-nums lining-nums'
+        });
+        t.textContent = text;
+        g.appendChild(t);
+        return t;
+    };
+
+    const arcs = [];
+    let pinned = null;
+
+    const tLabel = centre(-42, 'PEAK WINDOW', 10, tone.muted, 600);
+    const tWindow = centre(-22, DIAL_BINS[peak][1], 13, tone.muted);
+    const tValue = centre(10, values[peak].toFixed(1) + '%', 32, tone.ink, 600);
+    const tSub = centre(28, 'serious or fatal', 10.5, tone.muted);
+    const cap = document.getElementById('landing-dial-cap');
+
+    // Show window `i`, or fall back to the pinned one, then to the peak
+    const show = (i) => {
+        const at = (i == null) ? (pinned == null ? peak : pinned) : i;
+        arcs.forEach((a, k) => a.classList.toggle('is-active', k === at));
+        tLabel.textContent = at === peak ? 'PEAK WINDOW' : 'WINDOW';
+        tWindow.textContent = DIAL_BINS[at][1];
+        tValue.textContent = values[at].toFixed(1) + '%';
+        tSub.textContent = at === peak ? 'serious or fatal · the peak' : 'serious or fatal';
+        if (cap) {
+            cap.innerText = DIAL_BINS[at][1] + ' · ' + values[at].toFixed(1) + '% serious or fatal'
+                + (at === peak ? ' — the peak window' : '')
+                + (base != null ? ', against ' + base + '% overall' : '');
+        }
+    };
 
     const slot = 360 / DIAL_BINS.length;
     values.forEach((v, i) => {
@@ -1569,9 +1622,27 @@ function renderLandingDial(data) {
         const tier = t > 0.66 ? 2 : (t > 0.33 ? 1 : 0);
         const path = svgEl('path', {
             d: arcPath(cx, cy, rInner + weight / 2, i * slot + 2.5, (i + 1) * slot - 2.5),
-            fill: 'none', stroke: DIAL_TIER[tier], 'stroke-width': weight, 'stroke-linecap': 'butt'
+            fill: 'none', stroke: tone.tier[tier], 'stroke-width': weight,
+            'stroke-linecap': 'butt', 'class': 'dial-arc',
+            tabindex: '0', role: 'button',
+            'aria-label': DIAL_BINS[i][1] + ': ' + v.toFixed(1) + '% serious or fatal'
         });
+        const tip = svgEl('title', {});
+        tip.textContent = DIAL_BINS[i][1] + ' — ' + v.toFixed(1) + '% serious or fatal';
+        path.appendChild(tip);
+
+        const toggle = () => { pinned = (pinned === i ? null : i); show(null); };
+        path.addEventListener('mouseenter', () => show(i));
+        path.addEventListener('focus', () => show(i));
+        path.addEventListener('mouseleave', () => show(null));
+        path.addEventListener('blur', () => show(null));
+        path.addEventListener('click', toggle);
+        path.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+
         g.appendChild(path);
+        arcs.push(path);
         drawIn(path, i);
     });
 
@@ -1583,39 +1654,19 @@ function renderLandingDial(data) {
         const b = polarPoint(cx, cy, 76, h * 15);
         g.appendChild(svgEl('line', {
             x1: a[0].toFixed(1), y1: a[1].toFixed(1), x2: b[0].toFixed(1), y2: b[1].toFixed(1),
-            stroke: h === nowHour ? '#9cc6ee' : '#39424c',
+            stroke: h === nowHour ? tone.brand : (major ? tone.tick : tone.rim),
             'stroke-width': h === nowHour ? 2.4 : (major ? 1.4 : 1)
         }));
     }
 
     // A slow sweep, like a clock hand
-    const sweep = svgEl('line', {
+    g.appendChild(svgEl('line', {
         x1: cx, y1: cy, x2: cx, y2: cy - 74,
-        stroke: '#6ba3dd', 'stroke-width': 1.4, opacity: 0.5, 'stroke-linecap': 'round',
+        stroke: tone.brand, 'stroke-width': 1.4, opacity: 0.5, 'stroke-linecap': 'round',
         'class': 'dial-sweep'
-    });
-    g.appendChild(sweep);
+    }));
 
-    const centre = (offsetY, text, size, fill, weight) => {
-        const t = svgEl('text', {
-            x: cx, y: cy + offsetY, 'text-anchor': 'middle', fill: fill,
-            'font-size': size, 'font-family': 'Inter, system-ui, sans-serif',
-            'font-weight': weight || 400,
-            style: 'font-variant-numeric: tabular-nums lining-nums'
-        });
-        t.textContent = text;
-        g.appendChild(t);
-    };
-    centre(-42, 'PEAK WINDOW', 10, '#7d8894');
-    centre(-22, DIAL_BINS[peak][1], 13, '#cdd5dd');
-    centre(10, values[peak].toFixed(1) + '%', 32, '#ffffff', 600);
-    centre(28, 'serious or fatal', 10.5, '#98a2ad');
-
-    const cap = document.getElementById('landing-dial-cap');
-    if (cap && values[peak] && data && data.totals) {
-        cap.innerText = 'Peak ' + DIAL_BINS[peak][1] + ' · ' + values[peak].toFixed(1)
-            + '% serious or fatal, against ' + data.totals.high_sev_pct + '% overall';
-    }
+    show(peak);
 }
 
 function dismissLanding(instant) {
@@ -1646,7 +1697,8 @@ function initLanding() {
     landing.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { dismissLanding(); return; }
         if (e.key !== 'Tab') return;
-        const focusables = Array.prototype.slice.call(landing.querySelectorAll('button'));
+        // The dial windows are focusable too, so the ring includes them
+        const focusables = Array.prototype.slice.call(landing.querySelectorAll('button, .dial-arc'));
         if (!focusables.length) return;
         const first = focusables[0];
         const last = focusables[focusables.length - 1];

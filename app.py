@@ -1,4 +1,4 @@
-"""Flask backend for RoadSafe Analytics (pipeline v3: full STATS19 features, leak-free)."""
+"""Flask backend for RoadSafe (pipeline v3: full STATS19 features, leak-free)."""
 import os
 import json
 import joblib
