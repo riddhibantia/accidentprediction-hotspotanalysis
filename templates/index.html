@@ -3,344 +3,953 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RoadSafe AI - Accident Severity Prediction & Hotspot Analysis</title>
-    <!-- Tailwind CSS -->
+    <meta name="description" content="Accident severity prediction and high-risk road-area analysis for Great Britain, built on the DfT STATS19 2023 collision records.">
+    <title>RoadSafe AI — UK road safety analysis</title>
+
+    <!-- Tailwind: layout utilities only (colour and type come from the token layer below) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Leaflet CSS & JS for Interactive Map -->
+    <!-- Leaflet + MarkerCluster -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Font Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Inter (stand-in for Oracle Sans), variable weight 100-900 so 300/350/800 are available -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2312457e'/%3E%3Cpath d='M9 27 L13 5 M23 27 L19 5' stroke='white' stroke-width='2' fill='none'/%3E%3Cpath d='M16 8 v4 M16 15 v4 M16 22 v4' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] },
-                    colors: {
-                        brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 900: '#1e3a8a' }
-                    }
-                }
-            }
-        }
+        tailwind.config = { darkMode: 'class' };
     </script>
     <style>
-        .leaflet-container { width: 100%; height: 100%; border-radius: 0.75rem; z-index: 10; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        /* ============================================================
+           Design tokens
+           ============================================================ */
+        :root {
+            --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            --font-serif: Georgia, 'Times New Roman', serif;
+
+            --ink: #14181d;
+            --muted: #5f6873;
+            --paper: #ffffff;
+            --canvas: #f3f4f5;
+            --rule: #dcdfe3;
+            --rule-strong: #c4c9cf;
+
+            --brand: #12457e;
+            --brand-ink: #0d3357;
+            --brand-tint: #eef2f7;
+
+            --fatal: #b3261e;   --fatal-tint: #fbeeec;
+            --serious: #8f5a00; --serious-tint: #faf1e0;
+            --slight: #1f7a4d;  --slight-tint: #e8f3ee;
+
+            --r-card: 8px;
+            --r-ctl: 6px;
+            --shadow: 0 1px 2px rgba(20, 24, 29, .05);
+        }
+        html.dark {
+            --ink: #e8eaed;
+            --muted: #9aa4af;
+            --paper: #171b21;
+            --canvas: #0e1116;
+            --rule: #2a3037;
+            --rule-strong: #3a424b;
+            --brand: #6ba3dd;
+            --brand-ink: #89b8e6;
+            --brand-tint: #1b2733;
+            --fatal: #e2796f;   --fatal-tint: #2a1a18;
+            --serious: #d7a154; --serious-tint: #2a2317;
+            --slight: #5fb98a;  --slight-tint: #16251d;
+            --shadow: none;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            background: var(--canvas);
+            color: var(--ink);
+            font-family: var(--font-sans);
+            font-size: 16px;
+            font-weight: 400;
+            line-height: 1.4;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+        }
+        a { color: inherit; }
+        img { max-width: 100%; }
+
+        /* ============================================================
+           Type roles — letter-spacing 0 at every size
+           ============================================================ */
+        .t-display-serif-xl { font-family: var(--font-serif); font-weight: 400; font-size: 56px; line-height: 1.2; letter-spacing: 0; }
+        .t-display-serif-lg { font-family: var(--font-serif); font-weight: 400; font-size: 40px; line-height: 1.2; letter-spacing: 0; }
+        .t-display-serif-md { font-family: var(--font-serif); font-weight: 400; font-size: 36px; line-height: 1.2; letter-spacing: 0; }
+        .t-display-sans-lg  { font-family: var(--font-sans); font-weight: 300; font-size: 40px; line-height: 1.3; letter-spacing: 0; }
+        .t-display-sans-md  { font-family: var(--font-sans); font-weight: 300; font-size: 32px; line-height: 1.375; letter-spacing: 0; }
+        .t-heading-xl { font-family: var(--font-sans); font-weight: 800; font-size: 28px; line-height: 1.2; letter-spacing: 0; }
+        .t-heading-lg { font-family: var(--font-sans); font-weight: 800; font-size: 24px; line-height: 1.2; letter-spacing: 0; }
+        .t-heading-md { font-family: var(--font-sans); font-weight: 800; font-size: 20px; line-height: 1.2; letter-spacing: 0; }
+        .t-heading-sm { font-family: var(--font-sans); font-weight: 800; font-size: 18px; line-height: 1.2; letter-spacing: 0; }
+        .t-heading-card { font-family: var(--font-sans); font-weight: 600; font-size: 24px; line-height: 1.3333; letter-spacing: 0; }
+        .t-lead { font-family: var(--font-sans); font-weight: 400; font-size: 24px; line-height: 1.4; letter-spacing: 0; }
+        .t-body { font-family: var(--font-sans); font-weight: 400; font-size: 16px; line-height: 1.4; letter-spacing: 0; }
+        .t-body-loose { font-family: var(--font-sans); font-weight: 350; font-size: 16px; line-height: 1.5; letter-spacing: 0; }
+        .t-body-strong { font-family: var(--font-sans); font-weight: 700; font-size: 16px; line-height: 1.4; letter-spacing: 0; }
+        .t-label { font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2; letter-spacing: 0; }
+        .t-label-strong { font-family: var(--font-sans); font-weight: 600; font-size: 14px; line-height: 1.43; letter-spacing: 0; }
+        .t-caption { font-family: var(--font-sans); font-weight: 400; font-size: 12px; line-height: 1.67; letter-spacing: 0; }
+
+        /* Display roles only scale down on small screens */
+        @media (max-width: 720px) {
+            .t-display-serif-xl { font-size: 40px; line-height: 1.2; }
+            .t-display-serif-lg { font-size: 32px; line-height: 1.2; }
+            .t-display-serif-md { font-size: 28px; line-height: 1.25; }
+            .t-display-sans-lg { font-size: 32px; line-height: 1.3; }
+            .t-display-sans-md { font-size: 26px; line-height: 1.375; }
+            .t-lead { font-size: 20px; line-height: 1.45; }
+        }
+
+        /* Colour helpers */
+        .fg-ink { color: var(--ink); }
+        .fg-muted { color: var(--muted); }
+        .fg-brand { color: var(--brand); }
+        .fg-fatal { color: var(--fatal); }
+        .fg-serious { color: var(--serious); }
+        .fg-slight { color: var(--slight); }
+        .fg-link { color: var(--brand); text-decoration: none; }
+        .fg-link:hover { text-decoration: underline; }
+
+        /* ============================================================
+           Shell
+           ============================================================ */
+        .app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+
+        .rail {
+            width: 264px; flex: 0 0 264px;
+            background: var(--paper); color: var(--ink);
+            border-right: 1px solid var(--rule);
+            display: flex; flex-direction: column; z-index: 40;
+            transition: transform .25s ease;
+        }
+        .rail-brand {
+            height: 64px; display: flex; align-items: center; gap: 12px;
+            padding: 0 20px; border-bottom: 1px solid var(--rule);
+        }
+        .rail-mark { width: 34px; height: 34px; border-radius: 7px; background: var(--brand);
+            display: flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto; }
+        .rail-name { color: var(--ink); display: block; }
+        .rail-sub  { color: var(--muted); }
+        .rail-nav { flex: 1; overflow-y: auto; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
+        .rail-eyebrow { color: var(--muted); padding: 0 12px 10px; }
+        .rail-link {
+            display: flex; align-items: center; gap: 12px; width: 100%;
+            padding: 11px 12px; border: 0; border-left: 2px solid transparent; background: transparent;
+            border-radius: var(--r-ctl); color: var(--ink); cursor: pointer; text-align: left;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .rail-link i { width: 20px; text-align: center; font-size: 15px; }
+        .rail-link:hover { background: var(--canvas); color: var(--ink); }
+        .rail-link.is-active { background: var(--brand-tint); color: var(--brand); border-left-color: var(--brand); }
+        .rail-foot { padding: 16px 20px; border-top: 1px solid var(--rule); }
+        .rail-status { display: flex; align-items: center; gap: 10px; color: var(--ink); }
+        .rail-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--slight); flex: 0 0 auto; }
+        .rail-dataset { margin-top: 6px; color: var(--muted); }
+
+        .main { flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-width: 0; }
+        .topbar {
+            height: 64px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+            gap: 16px; padding: 0 24px; background: var(--paper); border-bottom: 1px solid var(--rule); z-index: 20;
+        }
+        .icon-btn {
+            width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+            background: transparent; border: 1px solid var(--rule); border-radius: var(--r-ctl);
+            color: var(--muted); cursor: pointer; flex: 0 0 auto;
+        }
+        .icon-btn:hover { background: var(--canvas); color: var(--ink); }
+        .topbar-meta { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+        .topbar-sep { width: 1px; height: 20px; background: var(--rule); }
+
+        .page { flex: 1; overflow-y: auto; background: var(--canvas); }
+        .page-inner { max-width: 1180px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 26px; }
+
+        @media (max-width: 1023.98px) {
+            .rail { position: fixed; top: 0; bottom: 0; left: 0; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+            .rail.closed { transform: translateX(-100%); }
+            .page-inner { padding: 20px; }
+            .topbar { padding: 0 16px; }
+        }
+
+        /* ============================================================
+           Components
+           ============================================================ */
+        .card { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-card); }
+        .card-pad { padding: 24px; }
+        .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+
+        /* The one signature device: a road centre-line rule under page headlines */
+        .rule-dashed {
+            height: 2px; width: 100%;
+            background-image: repeating-linear-gradient(90deg, var(--rule-strong) 0 16px, transparent 16px 30px);
+        }
+
+        .page-head { display: flex; flex-direction: column; gap: 10px; max-width: 720px; }
+        .page-head .t-display-serif-lg,
+        .page-head .t-display-serif-md { margin: 2px 0 0; }
+
+        .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+        /* Stats: hairline-separated cells, serif figures */
+        .stats { display: grid; grid-template-columns: 1fr; gap: 1px; background: var(--rule); overflow: hidden; }
+        .stat { background: var(--paper); padding: 20px 22px; }
+        .stat-label { color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.67; }
+        /* Data figures: Inter, tabular lining numerals (never serif old-style figures) */
+        .stat-num {
+            color: var(--ink); margin: 8px 0 4px;
+            font-family: var(--font-sans); font-weight: 600; font-size: 32px; line-height: 1.12; letter-spacing: 0;
+            font-variant-numeric: tabular-nums lining-nums;
+            font-feature-settings: "tnum" 1, "lnum" 1;
+        }
+        .num { font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1; }
+        .stat-foot { color: var(--muted); font-size: 12px; line-height: 1.67; }
+        @media (min-width: 640px) { .stats { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1024px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+
+        .chart-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 1024px) { .chart-grid { grid-template-columns: 1fr 1fr; } }
+        .chart-box { position: relative; height: 288px; }
+
+        /* Data insights: expandable chart cards */
+        .chart-card { cursor: zoom-in; transition: border-color .15s ease, box-shadow .15s ease; }
+        .chart-card:hover { border-color: var(--brand); box-shadow: 0 4px 16px rgba(20,24,29,.08); }
+        .chart-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+        .chart-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+        .chart-card__expand { color: var(--muted); font-size: 13px; line-height: 1.4; flex: 0 0 auto; }
+        .chart-card:hover .chart-card__expand { color: var(--brand); }
+
+        .chart-modal { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .chart-modal[hidden] { display: none; }
+        .chart-modal__backdrop { position: absolute; inset: 0; background: rgba(10,14,18,.55); }
+        .chart-modal__panel {
+            position: relative; width: min(1100px, 100%); max-height: 92vh; overflow-y: auto;
+            background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-card);
+            box-shadow: 0 24px 60px rgba(0,0,0,.28); padding: 28px;
+            display: flex; flex-direction: column; gap: 18px;
+        }
+        .chart-modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+        .chart-modal__close {
+            width: 36px; height: 36px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+            background: transparent; border: 1px solid var(--rule); border-radius: var(--r-ctl); color: var(--muted); cursor: pointer;
+        }
+        .chart-modal__close:hover { background: var(--canvas); color: var(--ink); }
+        .chart-modal__body .chart-box { height: 58vh; min-height: 320px; }
+        .chart-modal__note { max-width: 84ch; margin: 0; }
+        @media (max-width: 767.98px) {
+            .chart-modal { padding: 12px; }
+            .chart-modal__panel { padding: 18px; }
+            .chart-modal__body .chart-box { height: 48vh; min-height: 260px; }
+        }
+
+        .overview-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 1024px) { .overview-grid { grid-template-columns: 2fr 1fr; } }
+
+        /* Severity scale */
+        .sev-list { display: flex; flex-wrap: wrap; gap: 14px; margin: 16px 0 20px; }
+        .sev { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; font-size: 14px; line-height: 1.2; color: var(--ink); }
+        .sev-swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+
+        .risk-panel { padding: 24px; display: flex; flex-direction: column; }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2;
+            padding: 12px 16px; border-radius: var(--r-ctl); border: 1px solid transparent;
+            cursor: pointer; transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+        }
+        .btn-primary { background: var(--brand); color: #fff; }
+        .btn-primary:hover { background: var(--brand-ink); }
+        .btn-ghost { background: var(--paper); color: var(--ink); border-color: var(--rule-strong); }
+        .btn-ghost:hover { background: var(--canvas); }
+        .btn-block { width: 100%; }
+        .btn:disabled { opacity: .6; cursor: default; }
+
+        /* Segmented filter */
+        .seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: var(--r-ctl); overflow: hidden; }
+        .seg button {
+            background: var(--paper); border: 0; border-right: 1px solid var(--rule);
+            padding: 8px 14px; cursor: pointer; color: var(--muted);
+            font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2;
+        }
+        .seg button:last-child { border-right: 0; }
+        .seg button:hover { background: var(--canvas); color: var(--ink); }
+        .seg button.is-active { background: var(--brand-tint); color: var(--brand); }
+
+        /* Form */
+        .form-grid { display: grid; grid-template-columns: 1fr; gap: 20px 24px; }
+        @media (min-width: 768px) { .form-grid { grid-template-columns: 1fr 1fr; } }
+        .field-group { display: flex; flex-direction: column; }
+        .field-group.wide { grid-column: 1 / -1; }
+        .field-label { color: var(--ink); font-weight: 500; font-size: 14px; line-height: 1.2; margin-bottom: 7px; }
+        .field {
+            width: 100%; background: var(--paper); color: var(--ink);
+            border: 1px solid var(--rule-strong); border-radius: var(--r-ctl);
+            padding: 11px 12px; font-family: var(--font-sans); font-size: 16px; line-height: 1.4;
+        }
+        .field:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+        .field[readonly] { background: var(--canvas); color: var(--muted); }
+        .field-hint { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 6px; }
+        .field-error { color: var(--fatal); font-size: 12px; line-height: 1.67; margin-top: 6px; }
+
+        /* Result panel */
+        .result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); margin-bottom: 22px; }
+        .badge {
+            display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+            font-weight: 600; font-size: 12px; line-height: 1.2; border: 1px solid transparent;
+        }
+        .result-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+        @media (min-width: 768px) { .result-grid { grid-template-columns: repeat(3, 1fr); } }
+        .badge-slight { background: var(--slight-tint); color: var(--slight); border-color: var(--slight); }
+        .badge-serious { background: var(--serious-tint); color: var(--serious); border-color: var(--serious); }
+        .badge-fatal { background: var(--fatal-tint); color: var(--fatal); border-color: var(--fatal); }
+        .badge-neutral { background: var(--canvas); color: var(--muted); border-color: var(--rule-strong); }
+        .result-cell { background: var(--canvas); border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px; text-align: center; }
+        .result-cell .t-heading-md { margin: 8px 0 2px; }
+        .result-label { color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.67; }
+        .result-sub { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 4px; }
+
+        .prob-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+        .prob-track { height: 8px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--rule); overflow: hidden; }
+        .prob-fill { height: 100%; width: 0; transition: width .5s ease; }
+        .prob-fill.slight { background: var(--slight); }
+        .prob-fill.serious { background: var(--serious); }
+        .prob-fill.fatal { background: var(--fatal); }
+
+        /* Hotspot */
+        .hotspot-shell { display: flex; flex-direction: column; height: calc(100vh - 13rem); min-height: 560px; }
+        .hotspot-body { flex: 1; min-height: 0; margin-top: 18px; display: flex; flex-direction: column; gap: 16px; }
+        @media (min-width: 1024px) { .hotspot-body { flex-direction: row; } }
+        .hotspot-list { flex: 0 0 auto; background: var(--canvas); border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px; overflow-y: auto; max-height: 260px; }
+        @media (min-width: 1024px) { .hotspot-list { width: 288px; flex: 0 0 288px; max-height: none; } }
+        .hotspot-item {
+            display: block; width: 100%; text-align: left; cursor: pointer;
+            background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-ctl);
+            padding: 10px 12px; margin-bottom: 8px;
+            transition: border-color .15s ease, background-color .15s ease;
+        }
+        .hotspot-item:hover { border-color: var(--brand); background: var(--brand-tint); }
+        .hotspot-item .row1 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .hotspot-item .row1 .t-label { color: var(--ink); }
+        .hotspot-item .meta { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 4px; }
+        .hotspot-map { flex: 1; min-height: 340px; position: relative; }
+        #map { position: absolute; inset: 0; border-radius: var(--r-card); z-index: 1; }
+
+        .risk { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; border: 1px solid transparent; font-weight: 600; font-size: 12px; line-height: 1.2; }
+        .risk-high { background: var(--fatal-tint); color: var(--fatal); border-color: var(--fatal); }
+        .risk-mid { background: var(--serious-tint); color: var(--serious); border-color: var(--serious); }
+        .risk-low { background: var(--slight-tint); color: var(--slight); border-color: var(--slight); }
+
+        .site-footer {
+            margin-top: 14px; padding-top: 20px; border-top: 1px solid var(--rule);
+            display: flex; flex-direction: column; gap: 6px; color: var(--muted);
+        }
+        @media (min-width: 640px) { .site-footer { flex-direction: row; align-items: center; justify-content: space-between; } }
+        .site-footer, .site-footer a, .site-footer span { font-family: var(--font-sans); font-weight: 400; font-size: 12px; line-height: 1.67; }
+
+        /* Leaflet + chrome */
+        .leaflet-container { width: 100%; height: 100%; border-radius: var(--r-card); z-index: 1; }
+        .map-legend { background: var(--paper); color: var(--ink); padding: 10px 12px; border-radius: var(--r-card);
+            box-shadow: var(--shadow); border: 1px solid var(--rule); font-size: 12px; line-height: 1.67; }
+        .map-legend b { font-weight: 700; }
+        .map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 7px; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+        /* Accessibility */
+        :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+        .skip-link {
+            position: absolute; left: 12px; top: -48px; z-index: 100;
+            background: var(--brand); color: #fff; padding: 10px 14px; border-radius: var(--r-ctl);
+            font-weight: 500; font-size: 14px; transition: top .15s ease;
+        }
+        .skip-link:focus { top: 12px; }
+
+        /* Loading skeleton */
+        .skeleton { position: relative; overflow: hidden; background: var(--rule); border-radius: 6px; }
+        .skeleton::after {
+            content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+            animation: shimmer 1.4s infinite;
+        }
+        @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+        @media (prefers-reduced-motion: reduce) {
+            * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+            .skeleton::after { animation: none; }
+        }
+
+        /* ============================================================
+           Console: filter strip
+           ============================================================ */
+        .control-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; }
+        .control-group { display: flex; align-items: center; gap: 10px; }
+        .control-label { color: var(--muted); font-size: 12px; line-height: 1.67; white-space: nowrap; }
+        .control-group.end { margin-left: auto; }
+        .field-sm { padding: 8px 10px; font-size: 14px; line-height: 1.43; }
+        select.field { cursor: pointer; }
+
+        /* ============================================================
+           Console: map + side column
+           ============================================================ */
+        .dash-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 1024px) { .dash-grid { grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); } }
+        .dash-map { position: relative; height: 440px; }
+        .dash-map #map { position: absolute; inset: 0; border-radius: var(--r-card); z-index: 1; }
+        .dash-side { display: flex; flex-direction: column; gap: 20px; }
+
+        .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 2px; }
+        .legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; line-height: 1.67; }
+        .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+        /* ============================================================
+           KPI tiles
+           ============================================================ */
+        .kpi-grid {
+            display: grid; grid-template-columns: 1fr; gap: 1px;
+            background: var(--rule); border: 1px solid var(--rule);
+            border-radius: var(--r-card); overflow: hidden;
+        }
+        @media (min-width: 640px) { .kpi-grid { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1024px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        .kpi { background: var(--paper); padding: 18px 20px; }
+        .kpi-value {
+            color: var(--ink); margin: 7px 0 2px;
+            font-family: var(--font-sans); font-weight: 600; font-size: 28px; line-height: 1.1; letter-spacing: 0;
+            font-variant-numeric: tabular-nums lining-nums;
+            font-feature-settings: "tnum" 1, "lnum" 1;
+        }
+        .kpi-sub { color: var(--muted); font-size: 12px; line-height: 1.67; }
+
+        /* ============================================================
+           Situation panel
+           ============================================================ */
+        .sit-list { display: flex; flex-direction: column; }
+        .sit-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+        .sit-row:last-child { border-bottom: 0; padding-bottom: 0; }
+        .sit-row:first-child { padding-top: 0; }
+        .sit-k { color: var(--muted); font-size: 14px; line-height: 1.43; font-weight: 500; }
+        .sit-v { color: var(--ink); font-size: 14px; line-height: 1.43; font-weight: 600; text-align: right; }
+
+        .chip {
+            display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 4px;
+            font-weight: 600; font-size: 12px; line-height: 1.2;
+            border: 1px solid var(--rule-strong); color: var(--muted); background: var(--canvas);
+        }
+        .chip-brand { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); }
+        .chip-warn { border-color: var(--serious); color: var(--serious); background: var(--serious-tint); }
+        .chip-alert { border-color: var(--fatal); color: var(--fatal); background: var(--fatal-tint); }
+
+        .spark { position: relative; height: 150px; }
+
+        /* ============================================================
+           Top-areas grid (reuses .hotspot-item)
+           ============================================================ */
+        .hotspot-list--grid {
+            display: grid; grid-template-columns: 1fr; gap: 10px;
+            width: auto; flex: 0 1 auto; max-height: none; overflow: visible;
+            padding: 0; background: transparent; border: 0;
+        }
+        @media (min-width: 768px) { .hotspot-list--grid { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1200px) { .hotspot-list--grid { grid-template-columns: repeat(3, 1fr); } }
+        .hotspot-list--grid .hotspot-item { margin-bottom: 0; }
+        .hotspot-item.is-active { border-color: var(--brand); background: var(--brand-tint); }
+
+        /* ============================================================
+           Data table (ranked areas + location comparison)
+           ============================================================ */
+        .data-table { width: 100%; border-collapse: collapse; text-align: left; }
+        .data-table th {
+            color: var(--muted); font-weight: 600; font-size: 12px; line-height: 1.67;
+            padding: 11px 12px; background: var(--canvas); border-bottom: 1px solid var(--rule); white-space: nowrap;
+        }
+        .data-table td {
+            padding: 11px 12px; border-bottom: 1px solid var(--rule);
+            font-size: 14px; line-height: 1.43;
+            font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1;
+        }
+        .data-table tbody tr:last-child td { border-bottom: 0; }
+        .data-table tbody tr:hover td { background: var(--canvas); }
+        .data-table td.num-col, .data-table th.num-col { text-align: right; }
+        .data-table button.link { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; cursor: pointer; text-align: left; }
+        .data-table button.link:hover { text-decoration: underline; }
+
+        /* ============================================================
+           Location explorer
+           ============================================================ */
+        .loc-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 1024px) { .loc-grid { grid-template-columns: 300px minmax(0, 1fr); } }
+        .loc-list { max-height: 520px; overflow-y: auto; }
+        .loc-item {
+            display: block; width: 100%; text-align: left; cursor: pointer;
+            background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-ctl);
+            padding: 10px 12px; margin-bottom: 8px;
+            transition: border-color .15s ease, background-color .15s ease;
+        }
+        .loc-item:hover { border-color: var(--brand); background: var(--brand-tint); }
+        .loc-item.is-active { border-color: var(--brand); background: var(--brand-tint); }
+        .loc-item .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+        .loc-item .meta { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 3px; }
+
+        /* ============================================================
+           Print: one-page report only
+           ============================================================ */
+        .print-only { display: none; }
+        @media print {
+            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop { display: none !important; }
+            .app { display: block; height: auto; width: auto; overflow: visible; }
+            .main, .page { display: block; height: auto; overflow: visible; }
+            .page-inner { max-width: none; padding: 0; gap: 14px; }
+            .card { border-color: #bbb; box-shadow: none; break-inside: avoid; }
+            body { background: #fff; color: #000; }
+            .print-only { display: block !important; }
+            a[href]::after { content: ""; }
+        }
     </style>
 </head>
-<body class="h-full bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
+<body>
 
-    <div class="flex h-screen w-screen overflow-hidden">
+    <a class="skip-link" href="#main">Skip to content</a>
 
-        <!-- Sidebar Navigation -->
-        <aside id="sidebar" class="w-64 bg-slate-900 text-slate-300 flex flex-col transition-all duration-300 z-30 shadow-xl">
-            <div class="h-16 flex items-center px-6 bg-slate-950 border-b border-slate-800">
-                <div class="flex items-center space-x-3">
-                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
-                        <i class="fa-solid fa-shield-halved text-lg"></i>
-                    </div>
-                    <div>
-                        <span class="text-lg font-bold tracking-tight text-white block">RoadSafe AI</span>
-                        <span class="text-xs text-blue-400 font-medium">Severity & Hotspot Engine</span>
-                    </div>
+    <div class="app">
+
+        <!-- Navigation rail -->
+        <aside id="sidebar" class="rail closed" aria-label="Main navigation">
+            <div class="rail-brand">
+                <span class="rail-mark"><i class="fa-solid fa-road"></i></span>
+                <div>
+                    <span class="rail-name t-heading-md">RoadSafe AI</span>
+                    <span class="rail-sub t-caption">UK road safety analysis</span>
                 </div>
             </div>
 
-            <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">Modules</div>
-                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all bg-blue-600 text-white shadow-lg shadow-blue-600/20">
-                    <i class="fa-solid fa-chart-pie w-5 text-center"></i>
-                    <span>Overview Dashboard</span>
+            <nav class="rail-nav">
+                <p class="rail-eyebrow t-caption">Modules</p>
+                <button type="button" onclick="switchTab('dashboard')" id="nav-dashboard" class="rail-link is-active t-label-strong">
+                    <i class="fa-solid fa-chart-pie"></i><span>Overview</span>
                 </button>
-                <button onclick="switchTab('predict')" id="nav-predict" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
-                    <i class="fa-solid fa-calculator w-5 text-center"></i>
-                    <span>Predict Severity</span>
+                <button type="button" onclick="switchTab('analytics')" id="nav-analytics" class="rail-link t-label-strong">
+                    <i class="fa-solid fa-chart-line"></i><span>Data insights</span>
                 </button>
-                <button onclick="switchTab('hotspots')" id="nav-hotspots" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
-                    <i class="fa-solid fa-map-location-dot w-5 text-center"></i>
-                    <span>Hotspot Analysis</span>
+                <button type="button" onclick="switchTab('predict')" id="nav-predict" class="rail-link t-label-strong">
+                    <i class="fa-solid fa-car-burst"></i><span>Severity predictor</span>
                 </button>
-                <button onclick="switchTab('analytics')" id="nav-analytics" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
-                    <i class="fa-solid fa-chart-line w-5 text-center"></i>
-                    <span>Data Insights</span>
-                </button>
-                <button onclick="switchTab('comparison')" id="nav-comparison" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-slate-400 hover:bg-slate-800 hover:text-white">
-                    <i class="fa-solid fa-scale-balanced w-5 text-center"></i>
-                    <span>Model Comparison</span>
+                <button type="button" onclick="switchTab('hotspots')" id="nav-hotspots" class="rail-link t-label-strong">
+                    <i class="fa-solid fa-map-location-dot"></i><span>High-risk areas</span>
                 </button>
             </nav>
 
-            <div class="p-4 border-t border-slate-800 bg-slate-950/50">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                        <span class="text-xs font-medium text-slate-400">ML Model Active (XGBoost)</span>
-                    </div>
-                </div>
-                <div class="mt-2 text-[11px] text-slate-500">Dataset: STATS19 National Records</div>
+            <div class="rail-foot">
+                <div class="rail-status t-caption"><span class="dot"></span><span id="sidebar-model">Model: loading…</span></div>
+                <div class="rail-dataset t-caption">Dataset: DfT STATS19, 2023</div>
             </div>
         </aside>
 
-        <main class="flex-1 flex flex-col h-full overflow-hidden">
-            <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-20 shrink-0">
-                <div class="flex items-center space-x-4">
-                    <h1 id="page-title" class="text-xl font-bold text-slate-800 tracking-tight">Overview Dashboard</h1>
+        <div id="sidebar-backdrop" onclick="toggleSidebar()" class="hidden fixed inset-0 z-30 lg:hidden" style="background:rgba(10,14,18,.55)"></div>
+
+        <main id="main" class="main">
+            <header class="topbar">
+                <div class="flex items-center gap-3 min-w-0">
+                    <button type="button" onclick="toggleSidebar()" aria-label="Open navigation" class="icon-btn lg:hidden">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <h1 id="page-title" class="t-heading-md fg-ink truncate">Overview</h1>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <div class="hidden md:flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600">
-                        <i class="fa-regular fa-clock text-slate-400"></i>
+                <div class="flex items-center gap-4">
+                    <span class="topbar-meta hidden md:flex">
+                        <i class="fa-regular fa-clock"></i>
                         <span id="current-time"></span>
-                    </div>
-                    <div class="flex items-center space-x-3 pl-3 border-l border-slate-200">
-                        <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 font-semibold flex items-center justify-center text-sm shadow-inner">DS</div>
-                        <div class="hidden sm:block text-left">
-                            <div class="text-sm font-semibold text-slate-800 leading-none">Data Scientist</div>
-                            <div class="text-xs text-slate-500 mt-0.5">Admin Session</div>
-                        </div>
-                    </div>
+                    </span>
+                    <span class="topbar-sep hidden md:block"></span>
+                    <button type="button" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" class="icon-btn">
+                        <i id="theme-toggle-icon" class="fa-solid fa-moon"></i>
+                    </button>
+                    <span class="topbar-meta hidden sm:flex">
+                        <i class="fa-solid fa-database"></i>
+                        <span>STATS19 · DfT</span>
+                    </span>
                 </div>
             </header>
 
-            <div class="flex-1 overflow-y-auto p-6 lg:p-8 bg-slate-50">
+            <div class="page">
+                <div class="page-inner">
 
-                <!-- TAB 1: OVERVIEW DASHBOARD -->
-                <div id="tab-dashboard" class="space-y-6">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Accidents Analyzed</p>
-                            <h3 class="text-2xl font-bold text-slate-800 mt-1">1,389,640</h3>
-                            <span class="text-xs text-emerald-600 font-medium mt-3 block"><i class="fa-solid fa-arrow-trend-up mr-1"></i> STATS19 Full Dataset</span>
+                    <!-- ===================== OVERVIEW ===================== -->
+                    <div id="tab-dashboard" class="flex flex-col gap-6">
+                        <header class="page-head">
+                            <p class="t-caption fg-muted">UK collision data · 2023</p>
+                            <h2 class="t-display-serif-lg">Road safety in Great Britain, in numbers</h2>
+                            <p class="t-lead fg-muted">A year of road collisions, summarised — the evidence behind every severity prediction and every hotspot in this tool.</p>
+                        </header>
+                        <div class="rule-dashed"></div>
+
+                        <div class="stats card">
+                            <div class="stat">
+                                <p class="stat-label">Collisions analysed</p>
+                                <p id="stat-total" class="stat-num">—</p>
+                                <p class="stat-foot">2023 records</p>
+                            </div>
+                            <div class="stat">
+                                <p class="stat-label">High-risk hotspots</p>
+                                <p id="stat-hotspots" class="stat-num">—</p>
+                                <p class="stat-foot">Density clusters of collisions</p>
+                            </div>
+                            <div class="stat">
+                                <p class="stat-label">Served model · macro-F1</p>
+                                <p id="stat-accuracy" class="stat-num">—</p>
+                                <p id="stat-accuracy-sub" class="stat-foot">loading…</p>
+                            </div>
+                            <div class="stat">
+                                <p class="stat-label">Serious or fatal rate</p>
+                                <p id="stat-highsev" class="stat-num">—</p>
+                                <p class="stat-foot">Share of all casualties</p>
+                            </div>
                         </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">High-Risk Hotspots</p>
-                            <h3 class="text-2xl font-bold text-slate-800 mt-1">1,260</h3>
-                            <span class="text-xs text-rose-600 font-medium mt-3 block"><i class="fa-solid fa-location-crosshairs mr-1"></i> DBSCAN Clusters</span>
-                        </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Model Accuracy</p>
-                            <h3 class="text-2xl font-bold text-slate-800 mt-1">85.16%</h3>
-                            <span class="text-xs text-emerald-600 font-medium mt-3 block"><i class="fa-solid fa-circle-check mr-1"></i> XGBoost Classifier</span>
-                        </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">High Severity Rate</p>
-                            <h3 class="text-2xl font-bold text-slate-800 mt-1">14.8%</h3>
-                            <span class="text-xs text-amber-600 font-medium mt-3 block"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Fatal / Serious Ratio</span>
+
+                        <div class="overview-grid">
+                            <div class="card card-pad flex flex-col">
+                                <div class="card-head">
+                                    <h3 class="t-heading-sm">Casualties by severity</h3>
+                                    <span class="t-caption fg-muted">All 2023 records</span>
+                                </div>
+                                <div class="chart-box" style="height:264px"><canvas id="overviewSeverityChart"></canvas></div>
+                            </div>
+
+                            <aside class="card risk-panel">
+                                <p class="t-caption fg-muted">Severity scale</p>
+                                <h3 class="t-heading-md" style="margin:6px 0 8px">How this tool reads risk</h3>
+                                <p class="t-body fg-muted">Every prediction and every hotspot uses the same three levels taken from the collision records.</p>
+                                <div class="sev-list">
+                                    <span class="sev"><span class="sev-swatch" style="background:var(--slight)"></span>Slight</span>
+                                    <span class="sev"><span class="sev-swatch" style="background:var(--serious)"></span>Serious</span>
+                                    <span class="sev"><span class="sev-swatch" style="background:var(--fatal)"></span>Fatal</span>
+                                </div>
+                                <p class="t-body-loose fg-muted" style="margin:0 0 20px">Serious and fatal together make up the high-severity rate driving every hotspot ranking.</p>
+                                <button type="button" class="btn btn-ghost btn-block" style="margin-top:auto" onclick="switchTab('predict')">
+                                    Open the predictor <i class="fa-solid fa-arrow-right" style="font-size:12px"></i>
+                                </button>
+                            </aside>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm lg:col-span-2 flex flex-col justify-between">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-base font-bold text-slate-800">Accident Severity Distribution</h3>
-                                <span class="px-2.5 py-1 bg-blue-50 text-blue-600 font-semibold text-xs rounded-lg">Live Model Stats</span>
+                    <!-- ===================== DATA INSIGHTS ===================== -->
+                    <div id="tab-analytics" class="hidden flex flex-col gap-6">
+                        <header class="page-head">
+                            <p class="t-caption fg-muted">Data insights</p>
+                            <h2 class="t-display-serif-md">What the records show</h2>
+                            <p class="t-body fg-muted">National patterns across the 2023 collisions — weather, time of day, road surface, speed and vehicle type.</p>
+                        </header>
+                        <div class="rule-dashed"></div>
+                        <div class="chart-grid">
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: Casualties by weather"
+                                 data-explain="Fine weather dominates the count because that is when the most traffic is on the road. Wet, icy and snowy surfaces produce fewer collisions overall, but a larger share of them end in serious or fatal injury. Select a bar in the enlarged view to send that condition to the severity predictor.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">Casualties by weather</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="weatherChart"></canvas></div>
                             </div>
-                            <div class="h-64 relative"><canvas id="overviewSeverityChart"></canvas></div>
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: Collisions by time of day"
+                                 data-explain="Volume peaks in the morning and evening commutes, when the most vehicles are moving. The small hours carry far fewer collisions, so read that stretch as low volume rather than low risk.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">Collisions by time of day</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="timeChart"></canvas></div>
+                            </div>
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: Casualties by road surface"
+                                 data-explain="Dry roads account for most casualties simply because dry roads are the norm. The figure worth reading is the share of serious and fatal outcomes, which climbs on wet, icy and snowy surfaces. Select a bar in the enlarged view to send that surface to the severity predictor.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">Casualties by road surface</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="surfaceChart"></canvas></div>
+                            </div>
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: High-severity share by speed limit"
+                                 data-explain="The proportion of casualties killed or seriously injured rises steadily with the posted speed limit. A collision at 60 mph is far more likely to be fatal than one at 20 mph, which is why the bars step up across the chart.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">High-severity share by speed limit</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="speedChart"></canvas></div>
+                            </div>
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: Severity mix through the day"
+                                 data-explain="Each bar is a two-hour window, and the segments show how that window's casualties split between slight, serious and fatal. The fatal share is highest overnight, when there are fewer collisions but they are more violent.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">Severity mix through the day</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="hourSevChart"></canvas></div>
+                            </div>
+                            <div class="card card-pad chart-card" role="button" tabindex="0" aria-label="Enlarge chart: High-severity share by vehicle type"
+                                 data-explain="Motorcyclists and pedestrians carry a much larger share of serious and fatal casualties than their numbers in traffic would suggest. Cars dominate the raw count but sit lowest on severity share.">
+                                <div class="chart-card__head">
+                                    <h3 class="t-heading-sm">High-severity share by vehicle type</h3>
+                                    <span class="chart-card__expand" aria-hidden="true"><i class="fa-solid fa-expand"></i></span>
+                                </div>
+                                <div class="chart-box"><canvas id="vehSevChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===================== PREDICT ===================== -->
+                    <div id="tab-predict" class="hidden flex flex-col gap-6">
+                        <header class="page-head">
+                            <p class="t-caption fg-muted">Severity assessment</p>
+                            <h2 class="t-display-serif-md">Collision severity assessment</h2>
+                            <p class="t-body fg-muted">Enter the conditions at the scene. The model returns Slight, Serious or Fatal with probabilities, trained on 2023 UK collision records.</p>
+                        </header>
+                        <div class="rule-dashed"></div>
+
+                        <div class="card card-pad">
+                            <form id="prediction-form" onsubmit="handlePrediction(event)" class="form-grid">
+                                <div class="field-group wide">
+                                    <label class="field-label" for="city">City or area</label>
+                                    <select id="city" class="field">
+                                        <option value="">Loading cities…</option>
+                                    </select>
+                                    <p class="field-hint">Coordinates fill automatically from the selected UK city.</p>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="lat">Latitude</label>
+                                    <input type="number" step="any" id="lat" value="51.5074" readonly class="field">
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label" for="lng">Longitude</label>
+                                    <input type="number" step="any" id="lng" value="-0.1278" readonly class="field">
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="weather">Weather</label>
+                                    <select id="weather" class="field">
+                                        <option value="Clear">Clear / dry</option>
+                                        <option value="Rain">Rain / wet</option>
+                                        <option value="Fog">Fog / mist</option>
+                                        <option value="Snow">Snow</option>
+                                    </select>
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label" for="surface">Road surface</label>
+                                    <select id="surface" class="field">
+                                        <option value="Dry">Dry</option>
+                                        <option value="Wet or damp">Wet or damp</option>
+                                        <option value="Frost or ice">Frost or ice</option>
+                                        <option value="Snow">Snow</option>
+                                    </select>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="hour">Hour of day (0–23)</label>
+                                    <input type="number" id="hour" value="12" min="0" max="23" class="field">
+                                    <p id="hour-hint" class="field-error hidden">Hour must be 0–23.</p>
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label" for="vehicle-type">Vehicle type</label>
+                                    <select id="vehicle-type" class="field">
+                                        <option value="Car">Car</option>
+                                        <option value="Van">Van</option>
+                                        <option value="Motorcycle">Motorcycle</option>
+                                        <option value="Pedal cycle">Pedal cycle</option>
+                                        <option value="Bus/Coach">Bus / coach</option>
+                                        <option value="Taxi">Taxi</option>
+                                        <option value="HGV">HGV (over 7.5t)</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="age-band">Driver age band</label>
+                                    <select id="age-band" class="field">
+                                        <option value="Adult (26-55)">Adult (26–55)</option>
+                                        <option value="Young (16-25)">Young (16–25)</option>
+                                        <option value="Older (56+)">Older (56+)</option>
+                                        <option value="Unknown">Unknown</option>
+                                    </select>
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label" for="light">Light conditions</label>
+                                    <select id="light" class="field">
+                                        <option value="Daylight">Daylight</option>
+                                        <option value="Dark (lit)">Dark — street lights lit</option>
+                                        <option value="Dark (unlit)">Dark — unlit / no lighting</option>
+                                        <option value="Unknown">Unknown</option>
+                                    </select>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="road-type">Road type</label>
+                                    <select id="road-type" class="field">
+                                        <option value="Single carriageway">Single carriageway</option>
+                                        <option value="Dual carriageway">Dual carriageway</option>
+                                        <option value="Roundabout">Roundabout</option>
+                                        <option value="One-way / Slip road">One-way / slip road</option>
+                                        <option value="Unknown">Unknown</option>
+                                    </select>
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label" for="junction">Junction</label>
+                                    <select id="junction" class="field">
+                                        <option value="Not at junction">Not at junction (or within 20 m)</option>
+                                        <option value="T or staggered junction">T or staggered junction</option>
+                                        <option value="Crossroads">Crossroads</option>
+                                        <option value="More than 4 arms">More than 4 arms</option>
+                                        <option value="Private drive or entrance">Private drive or entrance</option>
+                                        <option value="Other junction">Other junction</option>
+                                    </select>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="speed">Speed limit (mph)</label>
+                                    <input type="number" id="speed" value="30" min="5" max="90" step="5" class="field">
+                                    <p id="speed-hint" class="field-error hidden">Speed limit must be 5–90 mph.</p>
+                                </div>
+
+                                <div class="field-group wide" style="padding-top:6px">
+                                    <button type="submit" id="run-btn" class="btn btn-primary btn-block" style="padding:15px 16px">
+                                        <i id="run-btn-icon" class="fa-solid fa-arrow-right-long"></i>
+                                        <span id="run-btn-label">Run prediction</span>
+                                    </button>
+                                </div>
+                            </form>
                         </div>
 
-                        <div class="bg-gradient-to-br from-blue-900 to-indigo-900 rounded-2xl p-6 text-white shadow-xl flex flex-col justify-between">
-                            <div>
-                                <span class="px-3 py-1 bg-blue-500/30 text-blue-200 text-xs font-semibold rounded-full uppercase">Predictive Tool</span>
-                                <h3 class="text-xl font-bold mt-3">Test New Incident Conditions</h3>
-                                <p class="text-xs text-slate-300 mt-2 leading-relaxed">Input road parameters into our trained XGBoost model for real-time risk assessment.</p>
+                        <div id="prediction-result" role="status" aria-live="polite" class="hidden card card-pad">
+                            <div class="result-head">
+                                <h3 class="t-heading-sm">Result</h3>
+                                <div class="flex items-center gap-2">
+                                    <span id="badge-time" class="badge"></span>
+                                    <span id="badge-severity" class="badge"></span>
+                                </div>
                             </div>
-                            <div class="mt-6">
-                                <button onclick="switchTab('predict')" class="w-full py-3 bg-white text-blue-900 font-semibold text-sm rounded-xl shadow-lg hover:bg-blue-50 transition-colors flex items-center justify-center space-x-2">
-                                    <span>Launch Predictor</span><i class="fa-solid fa-arrow-right text-xs"></i>
+
+                            <div class="result-grid">
+                                <div class="result-cell">
+                                    <p class="result-label">Predicted severity</p>
+                                    <p id="res-severity" class="t-heading-md fg-ink">—</p>
+                                </div>
+                                <div class="result-cell">
+                                    <p class="result-label">Model confidence</p>
+                                    <p id="res-confidence" class="t-heading-md fg-brand">—</p>
+                                    <p class="result-sub">Probability of the predicted class</p>
+                                </div>
+                                <div class="result-cell">
+                                    <p class="result-label">Nearest risk hotspot</p>
+                                    <p id="res-cluster" class="t-heading-sm fg-ink">—</p>
+                                    <p id="res-cluster-sub" class="result-sub"></p>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:24px">
+                                <p class="t-label-strong fg-ink" style="margin:0 0 12px">Probability by class</p>
+                                <div style="margin-bottom:14px">
+                                    <div class="prob-row"><span class="t-label fg-ink">Slight</span><span id="prob-slight" class="t-label fg-ink">—</span></div>
+                                    <div class="prob-track"><div id="bar-slight" class="prob-fill slight"></div></div>
+                                </div>
+                                <div style="margin-bottom:14px">
+                                    <div class="prob-row"><span class="t-label fg-ink">Serious</span><span id="prob-serious" class="t-label fg-ink">—</span></div>
+                                    <div class="prob-track"><div id="bar-serious" class="prob-fill serious"></div></div>
+                                </div>
+                                <div>
+                                    <div class="prob-row"><span class="t-label fg-ink">Fatal</span><span id="prob-fatal" class="t-label fg-ink">—</span></div>
+                                    <div class="prob-track"><div id="bar-fatal" class="prob-fill fatal"></div></div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:24px">
+                                <button type="button" onclick="viewPredictionOnMap()" class="btn btn-ghost btn-block">
+                                    <i class="fa-solid fa-map-location-dot"></i>
+                                    <span>View this area on the hotspot map</span>
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- TAB 2: PREDICT SEVERITY -->
-                <div id="tab-predict" class="hidden space-y-6">
-                    <div class="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-sm">
-                        <div class="max-w-3xl mb-8">
-                            <h2 class="text-xl font-bold text-slate-800">Accident Severity Prediction Engine</h2>
-                            <p class="text-sm text-slate-500 mt-1">Configure environmental and vehicular parameters for backend inference.</p>
-                        </div>
-
-                        <form id="prediction-form" onsubmit="handlePrediction(event)" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Latitude</label>
-                                <input type="number" step="any" id="lat" value="51.5074" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Longitude</label>
-                                <input type="number" step="any" id="lng" value="-0.1278" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Weather Condition</label>
-                                <select id="weather" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="Clear">Clear / Dry</option>
-                                    <option value="Rain">Rain / Wet</option>
-                                    <option value="Fog">Fog / Mist</option>
-                                    <option value="Snow">Snow</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Road Surface Type</label>
-                                <select id="surface" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="Dry Asphalt">Dry</option>
-                                    <option value="Wet Asphalt">Wet or damp</option>
-                                    <option value="Potholes">Frost or ice</option>
-                                    <option value="Unpaved">Snow</option>
-                                </select>
-                            </div>
-                            <div>
-                                <div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Select Machine Learning Model</label>
-                                <select id="algorithm-select" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="xgboost">XGBoost Classifier (Proposed)</option>
-                                <option value="random_forest">Random Forest Classifier</option>
-                                <option value="logistic_regression">Logistic Regression (Baseline)</option>
-                                </select>
-                            </div>
-                                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Speed Limit (MPH)</label>
-                                <input type="number" id="speed" value="30" min="15" max="85" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div class="md:col-span-2 pt-4">
-                                <button type="submit" class="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center space-x-2">
-                                    <i class="fa-solid fa-wand-magic-sparkles"></i>
-                                    <span>Run XGBoost Severity Prediction</span>
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div id="prediction-result" class="hidden bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-lg">
-                        <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                            <h3 class="text-lg font-bold text-slate-800">Inference Results & Probabilities</h3>
-                            <span id="badge-severity" class="px-3 py-1 rounded-full text-xs font-semibold uppercase"></span>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
-                                <span class="text-xs font-medium text-slate-500 uppercase">Predicted Severity</span>
-                                <div id="res-severity" class="text-2xl font-bold mt-2">--</div>
-                            </div>
-                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
-                                <span class="text-xs font-medium text-slate-500 uppercase">Model Confidence</span>
-                                <div id="res-confidence" class="text-2xl font-bold text-blue-600 mt-2">--</div>
-                            </div>
-                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
-                                <span class="text-xs font-medium text-slate-500 uppercase">Hotspot Cluster Match</span>
-                                <div id="res-cluster" class="text-2xl font-bold text-slate-800 mt-2">--</div>
-                            </div>
-                        </div>
-                        <div class="mt-6">
-                            <p class="text-xs font-semibold text-slate-600 uppercase mb-2">Class Probability Breakdown</p>
-                            <div class="space-y-3">
-                                <div>
-                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Slight Injury</span><span id="prob-slight">--</span></div>
-                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-slight" class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
-                                </div>
-                                <div>
-                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Serious Injury</span><span id="prob-serious">--</span></div>
-                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-serious" class="bg-amber-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
-                                </div>
-                                <div>
-                                    <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1"><span>Fatal Injury</span><span id="prob-fatal">--</span></div>
-                                    <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div id="bar-fatal" class="bg-rose-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div></div>
+                    <!-- ===================== HOTSPOTS ===================== -->
+                    <div id="tab-hotspots" class="hidden flex flex-col">
+                        <div class="card card-pad hotspot-shell">
+                            <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4" style="border-bottom:1px solid var(--rule)">
+                                <header class="page-head" style="max-width:640px">
+                                    <p class="t-caption fg-muted">High-risk areas</p>
+                                    <h2 class="t-display-serif-md">Where the risk concentrates</h2>
+                                    <p class="t-body fg-muted">Areas where serious and fatal collisions cluster. Click any area on the map, or in the list, to zoom in.</p>
+                                </header>
+                                <div class="flex flex-col sm:items-end gap-3">
+                                    <span id="hotspot-count" class="t-caption fg-muted"></span>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <div class="seg" id="sev-seg" role="group" aria-label="Filter areas by severity">
+                                            <button type="button" onclick="filterMap('all', this)" class="is-active" aria-pressed="true">All areas</button>
+                                            <button type="button" onclick="filterMap('fatal', this)" aria-pressed="false">With fatal</button>
+                                            <button type="button" onclick="filterMap('serious', this)" aria-pressed="false">High serious</button>
+                                        </div>
+                                        <div class="seg" id="time-seg" role="group" aria-label="Filter areas by time of day">
+                                            <button type="button" onclick="filterTime('All', this)" class="is-active" aria-pressed="true" title="All hours">All day</button>
+                                            <button type="button" onclick="filterTime('Morning', this)" aria-pressed="false" title="06:00 to 12:00">Morning</button>
+                                            <button type="button" onclick="filterTime('Afternoon', this)" aria-pressed="false" title="12:00 to 18:00">Afternoon</button>
+                                            <button type="button" onclick="filterTime('Night', this)" aria-pressed="false" title="18:00 to 06:00">Night</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- TAB 3: HOTSPOT ANALYSIS -->
-                <div id="tab-hotspots" class="hidden space-y-6 h-[calc(100vh-10rem)]">
-                    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm h-full flex flex-col">
-                        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-100 gap-4 shrink-0">
-                            <div>
-                                <h2 class="text-xl font-bold text-slate-800">Spatial Hotspot Clustering (DBSCAN)</h2>
-                                <p class="text-xs text-slate-500 mt-0.5">Interactive map displaying high-risk accident corridors.</p>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <button onclick="filterMap('all')" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">All Zones</button>
-                                <button onclick="filterMap('fatal')" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg">Fatal Hotspots</button>
-                                <button onclick="filterMap('serious')" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-semibold rounded-lg">Serious Hotspots</button>
+                            <div class="hotspot-body">
+                                <div class="hotspot-list">
+                                    <p id="hotspot-list-title" class="t-label-strong fg-muted" style="margin:0 0 10px">Top 10 by risk</p>
+                                    <div id="hotspot-list">
+                                        <p class="t-caption fg-muted skeleton" style="height:44px"></p>
+                                    </div>
+                                </div>
+                                <div class="hotspot-map"><div id="map"></div></div>
                             </div>
                         </div>
-                        <div class="flex-1 mt-4 relative min-h-[400px]">
-                            <div id="map" class="w-full h-full rounded-xl"></div>
-                        </div>
                     </div>
+
+                    <footer class="site-footer">
+                        <span>Estimates from UK STATS19 collision records. Not driving advice.</span>
+                        <span class="flex items-center gap-4">
+                            <span id="model-footer">Model: loading…</span>
+                            <a class="fg-link" href="https://www.gov.uk/government/statistics/reported-road-casualties-great-britain-annual-report-2023" target="_blank" rel="noopener">Source: DfT reported road casualties 2023</a>
+                        </span>
+                    </footer>
+
                 </div>
-
-                <!-- TAB 4: DATA INSIGHTS & ANALYTICS -->
-                <div id="tab-analytics" class="hidden space-y-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <h3 class="text-base font-bold text-slate-800 mb-4">Accidents by Weather Condition</h3>
-                            <div class="h-72 relative"><canvas id="weatherChart"></canvas></div>
-                        </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <h3 class="text-base font-bold text-slate-800 mb-4">Accidents by Time of Day</h3>
-                            <div class="h-72 relative"><canvas id="timeChart"></canvas></div>
-                        </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <h3 class="text-base font-bold text-slate-800 mb-4">Severity by Road Surface Type</h3>
-                            <div class="h-72 relative"><canvas id="surfaceChart"></canvas></div>
-                        </div>
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm">
-                            <h3 class="text-base font-bold text-slate-800 mb-4">Speed Limit vs High Severity %</h3>
-                            <div class="h-72 relative"><canvas id="speedChart"></canvas></div>
-                        </div>
-
-                        <!-- TAB: MODEL COMPARISON (Research Evaluation) -->
-<div id="tab-comparison" class="hidden space-y-6">
-    <div class="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200/80 shadow-sm">
-        <div class="max-w-3xl mb-6">
-            <h2 class="text-xl font-bold text-slate-800">Research Evaluation & Algorithm Benchmarks</h2>
-            <p class="text-sm text-slate-500 mt-1">Comparing baseline, ensemble, and hybrid spatial-boosted classifiers on the STATS19 test dataset.</p>
-        </div>
-
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">
-                        <th class="p-4 rounded-l-xl">Algorithm / Model</th>
-                        <th class="p-4">Accuracy (%)</th>
-                        <th class="p-4">Precision (%)</th>
-                        <th class="p-4">Recall (%)</th>
-                        <th class="p-4 rounded-r-xl">F1-Score (%)</th>
-                    </tr>
-                </thead>
-                <tbody id="metrics-table-body" class="divide-y divide-slate-100 text-sm">
-                    <!-- Populated via script.js -->
-                </tbody>
-            </table>
-        </div>
-
-        <div class="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="bg-slate-50 rounded-2xl p-6 border border-slate-200">
-                <h3 class="text-base font-bold text-slate-800 mb-2">Why XGBoost Outperforms Others?</h3>
-                <p class="text-xs text-slate-600 leading-relaxed">
-                    Standard models like Logistic Regression struggle with non-linear feature interactions between spatial cluster IDs and weather conditions. Random Forest reduces variance via bagging, but <b>XGBoost</b> utilizes gradient boosting with regularized objective functions, capturing extreme risk boundaries and handling class imbalance effectively.
-                </p>
-            </div>
-            <div class="h-64 relative bg-white p-4 rounded-2xl border border-slate-200">
-                <canvas id="comparisonBarChart"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-                    </div>
-                </div>
-
             </div>
         </main>
     </div>
 
-    <!-- External JavaScript Link -->
+    <div id="chart-modal" class="chart-modal no-print" hidden>
+        <div class="chart-modal__backdrop" data-close-chart="1"></div>
+        <div class="chart-modal__panel" role="dialog" aria-modal="true" aria-labelledby="chart-modal-title">
+            <div class="chart-modal__head">
+                <div>
+                    <p class="t-caption fg-muted">Data insights</p>
+                    <h3 id="chart-modal-title" class="t-heading-md">Chart</h3>
+                </div>
+                <button type="button" class="chart-modal__close" data-close-chart="1" aria-label="Close enlarged chart"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="chart-modal__body" id="chart-modal-body"></div>
+            <p id="chart-modal-note" class="chart-modal__note t-body fg-muted"></p>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
