@@ -74,16 +74,19 @@ function toggleTheme() {
 
 // Initialize Overview & Analytics Charts (real data from build_dashboard_data.py)
 let DASH = null;
-async function getDash() {
-    if (DASH) return DASH;
-    try {
-        const r = await fetch('/static/dashboard_data.json');
-        DASH = await r.json();
-    } catch (err) {
-        console.error('dashboard_data.json missing, using demo fallback:', err);
-        DASH = null;
+let DASH_PROMISE = null;
+function getDash() {
+    if (DASH) return Promise.resolve(DASH);
+    if (!DASH_PROMISE) {
+        DASH_PROMISE = fetch('/static/dashboard_data.json')
+            .then(r => r.json())
+            .then(json => { DASH = json; return json; })
+            .catch(err => {
+                console.error('dashboard_data.json missing, using demo fallback:', err);
+                return null;
+            });
     }
-    return DASH;
+    return DASH_PROMISE;
 }
 
 function initCharts() {
@@ -138,8 +141,7 @@ function initCharts() {
                     if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Fine no high winds': 'Clear', 'Raining no high winds': 'Rain', 'Fog or mist': 'Fog', 'Snowing': 'Snow' };
-                    const sel = document.getElementById('weather');
-                    if (sel && mapBack[label]) { sel.value = mapBack[label]; closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('weather', mapBack[label]); refreshPredictor(); closeChartModal(); switchTab('predict'); }
                 }
             }
         });
@@ -191,8 +193,7 @@ function initCharts() {
                     if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Dry': 'Dry', 'Wet or damp': 'Wet or damp', 'Frost or ice': 'Frost or ice', 'Snow': 'Snow' };
-                    const sel = document.getElementById('surface');
-                    if (sel && mapBack[label]) { sel.value = mapBack[label]; closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('surface', mapBack[label]); refreshPredictor(); closeChartModal(); switchTab('predict'); }
                 }
             }
         });
@@ -547,151 +548,582 @@ function viewPredictionOnMap() {
 
 // Map -> Predict: click anywhere to score that spot
 function predictHere(lat, lng) {
-    const latEl = document.getElementById('lat');
-    const lngEl = document.getElementById('lng');
-    if (latEl) latEl.value = lat.toFixed(4);
-    if (lngEl) lngEl.value = lng.toFixed(4);
+    setCoords(lat, lng);
+    const input = document.getElementById('city-search');
+    if (input) input.value = '';
+    const hint = document.getElementById('city-hint');
+    if (hint) hint.innerText = 'Scoring the point you picked on the map.';
     switchTab('predict');
+    refreshPredictor(0);
 }
 
-// Handle ML Severity Prediction Form Submission (backend auto-selects best model)
+// ---- Severity predictor: segmented controls, live scoring, comparison ----
+const SEG_PREFIX = '.seg-field[data-name="';
+
+function segInput(name) {
+    return document.querySelector(SEG_PREFIX + name + '"] input:checked');
+}
+function segValue(name) {
+    const el = segInput(name);
+    return el ? el.value : '';
+}
+function setSeg(name, value) {
+    let hit = false;
+    document.querySelectorAll(SEG_PREFIX + name + '"] input').forEach(el => {
+        const on = el.value === String(value);
+        el.checked = on;
+        if (on) hit = true;
+    });
+    return hit;
+}
+
 function readFormPayload() {
-    const hourEl = document.getElementById('hour');
+    const num = (id, dflt) => {
+        const el = document.getElementById(id);
+        const v = el ? parseFloat(el.value) : NaN;
+        return Number.isFinite(v) ? v : dflt;
+    };
+    const pick = (id) => {
+        const el = document.getElementById(id);
+        return el && el.value !== '' ? el.value : '';
+    };
     return {
-        latitude: parseFloat(document.getElementById('lat').value),
-        longitude: parseFloat(document.getElementById('lng').value),
-        weather: document.getElementById('weather').value,
-        road_surface: document.getElementById('surface').value,
-        speed_limit: parseInt(document.getElementById('speed').value),
-        hour: hourEl ? parseInt(hourEl.value) : 12,
-        vehicle_type: document.getElementById('vehicle-type') ? document.getElementById('vehicle-type').value : '',
-        age_band: document.getElementById('age-band') ? document.getElementById('age-band').value : '',
-        light: document.getElementById('light') ? document.getElementById('light').value : '',
-        road_type: document.getElementById('road-type') ? document.getElementById('road-type').value : '',
-        junction: document.getElementById('junction') ? document.getElementById('junction').value : ''
+        latitude: num('lat', 51.5074),
+        longitude: num('lng', -0.1278),
+        weather: segValue('weather') || 'Clear',
+        road_surface: segValue('surface') || 'Dry',
+        speed_limit: parseInt(segValue('speed_limit'), 10) || 30,
+        hour: num('hour', 12),
+        vehicle_type: pick('vehicle-type'),
+        age_band: segValue('age_band'),
+        light: segValue('light'),
+        road_type: pick('road-type'),
+        junction: pick('junction')
     };
 }
 
 function validatePayload(p) {
-    const hourHint = document.getElementById('hour-hint');
-    const speedHint = document.getElementById('speed-hint');
-    let ok = true;
-    const badHour = !Number.isInteger(p.hour) || p.hour < 0 || p.hour > 23;
-    const badSpeed = !Number.isFinite(p.speed_limit) || p.speed_limit < 5 || p.speed_limit > 90;
-    if (hourHint) hourHint.classList.toggle('hidden', !badHour);
-    if (speedHint) speedHint.classList.toggle('hidden', !badSpeed);
-    if (badHour || badSpeed) ok = false;
-    return ok;
+    const hint = document.getElementById('coords-error');
+    const bad = !Number.isFinite(p.latitude) || p.latitude < -90 || p.latitude > 90
+        || !Number.isFinite(p.longitude) || p.longitude < -180 || p.longitude > 180
+        || !Number.isFinite(p.speed_limit) || p.speed_limit < 5 || p.speed_limit > 90;
+    if (hint) hint.classList.toggle('hidden', !bad);
+    return !bad;
 }
 
-function setLoading(loading, label) {
-    const runBtn = document.getElementById('run-btn');
-    const runLabel = document.getElementById('run-btn-label');
-    const runIcon = document.getElementById('run-btn-icon');
-    if (runBtn) runBtn.disabled = loading;
-    if (loading) {
-        if (runLabel) runLabel.innerText = label || 'Predicting…';
-        if (runIcon) runIcon.className = 'fa-solid fa-circle-notch fa-spin';
-    } else {
-        if (runLabel) runLabel.innerText = 'Run prediction';
-        if (runIcon) runIcon.className = 'fa-solid fa-arrow-right-long';
+let SCORE_TIMER = null;
+let SCORE_SEQ = 0;
+let PINNED = null;
+let CURRENT_ASSESS = null;
+
+function setScoring(on) {
+    const panel = document.getElementById('prediction-result');
+    const status = document.getElementById('assess-status');
+    if (panel) panel.classList.toggle('is-scoring', on);
+    if (status) status.classList.toggle('hidden', !on);
+}
+
+function showAssessError(message) {
+    const panel = document.getElementById('prediction-result');
+    if (!panel) return;
+    let el = document.getElementById('assess-error');
+    if (!el) {
+        el = document.createElement('p');
+        el.id = 'assess-error';
+        el.className = 'field-error';
+        el.setAttribute('role', 'alert');
+        panel.appendChild(el);
     }
+    el.innerText = message;
+}
+
+function clearAssessError() {
+    const el = document.getElementById('assess-error');
+    if (el) el.remove();
+}
+
+function scheduleAutoScore(delay) {
+    clearTimeout(SCORE_TIMER);
+    SCORE_TIMER = setTimeout(runAutoScore, delay == null ? 300 : delay);
+}
+
+function runAutoScore() {
+    const payload = readFormPayload();
+    if (!validatePayload(payload)) return;
+    submitPrediction(payload);
+}
+
+function setLoading(loading) {
+    const runBtn = document.getElementById('run-btn');
+    const label = document.getElementById('run-btn-label');
+    const icon = document.getElementById('run-btn-icon');
+    if (runBtn) runBtn.disabled = loading;
+    if (label) label.innerText = loading ? 'Scoring…' : 'Score these conditions';
+    if (icon) icon.className = loading
+        ? 'fa-solid fa-circle-notch fa-spin'
+        : 'fa-solid fa-arrow-right-long';
 }
 
 async function handlePrediction(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    clearTimeout(SCORE_TIMER);
     const payload = readFormPayload();
     if (!validatePayload(payload)) return;
     setLoading(true);
     try {
         await submitPrediction(payload);
+        // An explicit run is the one time we move the page for you
+        const panel = document.getElementById('prediction-result');
+        if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } finally {
         setLoading(false);
     }
 }
 
-async function submitPrediction(payload) {
+// Re-read the controls and score again (used by presets, links and the chart jumps)
+function refreshPredictor(delay) {
+    updateHourReadout();
+    updateMoreState();
+    scheduleAutoScore(delay);
+}
 
+async function submitPrediction(payload) {
+    const seq = ++SCORE_SEQ;
+    setScoring(true);
     try {
         const response = await fetch('/predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-
         const result = await response.json();
-
-        if (result.status === 'success') {
-            const severity = result.predicted_severity;
-            const probs = result.probabilities;
-            
-            const slightProb = Math.round(probs['Slight'] ?? probs['Slight Injury'] ?? 60);
-            const seriousProb = Math.round(probs['Serious'] ?? probs['Serious Injury'] ?? 30);
-            const fatalProb = Math.round(probs['Fatal'] ?? probs['Fatal Injury'] ?? 10);
-            const maxProb = Math.max(slightProb, seriousProb, fatalProb);
-
-            let badgeClass = "badge-slight";
-            if (severity.toLowerCase().includes('fatal')) {
-                badgeClass = "badge-fatal";
-            } else if (severity.toLowerCase().includes('serious')) {
-                badgeClass = "badge-serious";
-            }
-
-            document.getElementById('prediction-result').classList.remove('hidden');
-            document.getElementById('res-severity').innerText = severity + ` (${result.algorithm_used})`;
-            document.getElementById('res-confidence').innerText = maxProb + '%';
-
-            const insideHotspot = (result.cluster_id ?? -1) >= 0;
-            const hsName = result.hotspot || (insideHotspot ? `Cluster #${result.cluster_id}` : 'Open road');
-            document.getElementById('res-cluster').innerText = hsName;
-            const hsSub = document.getElementById('res-cluster-sub');
-            if (hsSub) {
-                if (insideHotspot) {
-                    const rank = result.hotspot_rank ? `Rank #${result.hotspot_rank} of ${result.n_hotspots}` : `Cluster #${result.cluster_id}`;
-                    const sev = (result.hotspot_high_sev_pct != null) ? ` · ${result.hotspot_high_sev_pct}% serious or fatal` : '';
-                    hsSub.innerText = `${rank} · ${result.hotspot_count} collisions${sev}`;
-                } else {
-                    hsSub.innerText = 'Not inside a mapped accident hotspot';
-                }
-            }
-            
-            const badge = document.getElementById('badge-severity');
-            badge.className = "badge " + badgeClass;
-            badge.innerText = severity;
-
-            const timeBadge = document.getElementById('badge-time');
-            if (timeBadge) {
-                const tod = (result.time_of_day || 'Day').toString();
-                const isNight = tod.toLowerCase().startsWith('night');
-                timeBadge.className = "badge badge-neutral";
-                timeBadge.innerText = isNight ? "Night" : "Day";
-            }
-
-            document.getElementById('prob-slight').innerText = slightProb + '%';
-            document.getElementById('bar-slight').style.width = slightProb + '%';
-
-            document.getElementById('prob-serious').innerText = seriousProb + '%';
-            document.getElementById('bar-serious').style.width = seriousProb + '%';
-
-            document.getElementById('prob-fatal').innerText = fatalProb + '%';
-            document.getElementById('bar-fatal').style.width = fatalProb + '%';
-
-            LAST_PREDICT = {
-                lat: payload.latitude, lng: payload.longitude,
-                severity: severity,
-                hotspot: insideHotspot
-                    ? `Hotspot: ${hsName}${result.hotspot_rank ? ' (rank #' + result.hotspot_rank + ')' : ''}`
-                    : 'Open road (no mapped hotspot)',
-                conf: maxProb
-            };
-            document.getElementById('prediction-result').scrollIntoView({ behavior: 'smooth' });
-        } else {
-            alert('Prediction error: ' + result.message);
-        }
+        if (seq !== SCORE_SEQ) return null;
+        if (result.status !== 'success') throw new Error(result.message || 'Prediction failed');
+        renderAssessment(result, payload);
+        return result;
     } catch (error) {
-        console.error('Error connecting to Flask backend:', error);
-        alert('Could not connect to Flask server. Make sure app.py is running!');
+        if (seq === SCORE_SEQ) {
+            console.error('Prediction failed:', error);
+            showAssessError('Could not score those conditions: ' + (error && error.message ? error.message : error));
+        }
+        return null;
+    } finally {
+        if (seq === SCORE_SEQ) setScoring(false);
     }
+}
+
+// ---- Rendering the assessment ----
+function sevClass(severity) {
+    const s = String(severity).toLowerCase();
+    if (s.indexOf('fatal') >= 0) return 'fg-fatal';
+    if (s.indexOf('serious') >= 0) return 'fg-serious';
+    return 'fg-slight';
+}
+
+function fmtPct(v) {
+    return (Math.round(v * 10) / 10).toFixed(1) + '%';
+}
+
+function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+function setProb(key, value) {
+    const label = document.getElementById('prob-' + key);
+    const bar = document.getElementById('bar-' + key);
+    if (label) label.innerText = fmtPct(value);
+    if (bar) bar.style.width = Math.max(0, Math.min(100, value)) + '%';
+}
+
+function renderAssessment(result, payload) {
+    clearAssessError();
+    const probs = result.probabilities || {};
+    const slight = probs['Slight'] ?? probs['Slight Injury'] ?? 0;
+    const serious = probs['Serious'] ?? probs['Serious Injury'] ?? 0;
+    const fatal = probs['Fatal'] ?? probs['Fatal Injury'] ?? 0;
+    const severity = result.predicted_severity || '—';
+    const conf = Math.max(slight, serious, fatal);
+    const hour = Number.isFinite(result.hour) ? result.hour : Math.round(payload.hour);
+
+    const verdict = document.getElementById('res-severity');
+    if (verdict) {
+        verdict.innerText = severity;
+        verdict.className = 'assess-verdict ' + sevClass(severity);
+    }
+    const confEl = document.getElementById('res-confidence');
+    if (confEl) confEl.innerText = fmtPct(conf);
+
+    const sevBadge = document.getElementById('badge-severity');
+    if (sevBadge) {
+        const cls = sevClass(severity);
+        sevBadge.className = 'badge ' + (cls === 'fg-fatal' ? 'badge-fatal'
+            : cls === 'fg-serious' ? 'badge-serious' : 'badge-slight');
+        sevBadge.innerText = severity;
+    }
+    const timeBadge = document.getElementById('badge-time');
+    if (timeBadge) {
+        const night = (hour < 6 || hour >= 18);
+        timeBadge.className = 'badge badge-neutral';
+        timeBadge.innerText = String(hour).padStart(2, '0') + ':00 · ' + (night ? 'night' : 'day');
+    }
+
+    setProb('slight', slight);
+    setProb('serious', serious);
+    setProb('fatal', fatal);
+
+    const algo = document.getElementById('res-algo');
+    if (algo) algo.innerText = 'Scored by ' + (result.algorithm_used || 'the served model') + ', the fatal-first pick.';
+
+    renderContext(result.context || [], result.context_baseline_pct);
+
+    const insideHotspot = (result.cluster_id ?? -1) >= 0;
+    const hsName = result.hotspot || (insideHotspot ? 'Cluster #' + result.cluster_id : 'Open road');
+    const cluster = document.getElementById('res-cluster');
+    if (cluster) cluster.innerText = hsName;
+    const hsSub = document.getElementById('res-cluster-sub');
+    if (hsSub) {
+        if (insideHotspot) {
+            const rank = result.hotspot_rank
+                ? 'Rank #' + result.hotspot_rank + ' of ' + result.n_hotspots
+                : 'Cluster #' + result.cluster_id;
+            const sev = (result.hotspot_high_sev_pct != null)
+                ? ' · ' + result.hotspot_high_sev_pct + '% serious or fatal' : '';
+            hsSub.innerText = rank + ' · ' + Number(result.hotspot_count).toLocaleString('en-GB') + ' collisions' + sev;
+        } else {
+            hsSub.innerText = 'Not inside a mapped accident hotspot.';
+        }
+    }
+
+    LAST_PREDICT = {
+        lat: payload.latitude, lng: payload.longitude,
+        severity: severity,
+        hotspot: insideHotspot
+            ? 'Hotspot: ' + hsName + (result.hotspot_rank ? ' (rank #' + result.hotspot_rank + ')' : '')
+            : 'Open road (no mapped hotspot)',
+        conf: Math.round(conf)
+    };
+
+    CURRENT_ASSESS = {
+        label: describePayload(payload),
+        probs: { slight: slight, serious: serious, fatal: fatal }
+    };
+    renderCompare();
+}
+
+function renderContext(rows, baseline) {
+    const host = document.getElementById('context-list');
+    const baseEl = document.getElementById('context-base');
+    if (!host) return;
+    if (!rows.length) {
+        host.innerHTML = '<p class="t-caption fg-muted" style="margin:0">No record breakdown for these values.</p>';
+        if (baseEl) baseEl.innerText = '';
+        return;
+    }
+    const base = Number.isFinite(baseline) ? baseline : null;
+    if (baseEl) baseEl.innerText = base == null ? '' : 'vs ' + base + '% overall';
+    const scale = Math.max.apply(null, rows.map(r => r.hs_pct).concat(base == null ? [] : [base])) * 1.12 || 1;
+    host.innerHTML = rows.map(r => {
+        const d = base == null ? null : Math.round((r.hs_pct - base) * 10) / 10;
+        const cls = d == null || Math.abs(d) <= 0.05 ? 'flat' : (d > 0 ? 'up' : 'down');
+        const delta = d == null ? ''
+            : '<span class="ctx__delta ' + cls + '">' + (d > 0 ? '+' : '') + d.toFixed(1) + '</span>';
+        const fill = Math.max(2, Math.min(100, r.hs_pct / scale * 100));
+        const mark = base == null ? ''
+            : '<div class="ctx__base" style="left:' + (base / scale * 100).toFixed(1) + '%"></div>';
+        return '<div class="ctx">'
+            + '<div class="ctx__name">' + esc(r.label) + ' — <b>' + esc(r.display) + '</b></div>'
+            + '<div class="ctx__val">' + r.hs_pct.toFixed(1) + '%' + delta + '</div>'
+            + '<div class="ctx__track"><div class="ctx__fill" style="width:' + fill.toFixed(1) + '%"></div>' + mark + '</div>'
+            + '</div>';
+    }).join('');
+}
+
+function describePayload(p) {
+    const lightWord = { 'Daylight': 'daylight', 'Dark (lit)': 'lit', 'Dark (unlit)': 'unlit' }[p.light] || 'unknown light';
+    return String(Math.round(p.hour)).padStart(2, '0') + ':00 · ' + lightWord
+        + (p.road_type ? ' · ' + p.road_type : '');
+}
+
+function renderCompare() {
+    const box = document.getElementById('compare-block');
+    if (!box) return;
+    if (!PINNED || !CURRENT_ASSESS) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+    }
+    const rows = [['Slight', 'slight'], ['Serious', 'serious'], ['Fatal', 'fatal']].map(pair => {
+        const a = PINNED.probs[pair[1]];
+        const b = CURRENT_ASSESS.probs[pair[1]];
+        const d = Math.round((b - a) * 10) / 10;
+        const cls = Math.abs(d) <= 0.05 ? 'flat' : (d > 0 ? 'up' : 'down');
+        return '<div class="compare-row">'
+            + '<span class="t-label fg-ink">' + pair[0] + '</span>'
+            + '<span class="t-caption fg-muted num">' + fmtPct(a) + ' → <b class="fg-ink">' + fmtPct(b) + '</b></span>'
+            + '<span class="compare-delta ' + cls + ' num">' + (d > 0 ? '+' : '') + d.toFixed(1) + '</span>'
+            + '</div>';
+    }).join('');
+    box.innerHTML = '<div class="section-head" style="margin-bottom:10px">'
+        + '<p class="t-label-strong fg-ink" style="margin:0">Against pinned</p>'
+        + '<button type="button" class="link-btn t-caption" id="clear-pin">Clear</button>'
+        + '</div>'
+        + '<p class="t-caption fg-muted" style="margin:0 0 10px">' + esc(PINNED.label) + '</p>'
+        + rows;
+    box.classList.remove('hidden');
+    const clear = document.getElementById('clear-pin');
+    if (clear) clear.addEventListener('click', clearPin);
+}
+
+function pinScenario() {
+    if (PINNED) {
+        clearPin();
+        return;
+    }
+    if (!CURRENT_ASSESS) return;
+    PINNED = { label: CURRENT_ASSESS.label, probs: Object.assign({}, CURRENT_ASSESS.probs) };
+    const label = document.getElementById('pin-label');
+    if (label) label.innerText = 'Unpin';
+    renderCompare();
+}
+
+function clearPin() {
+    PINNED = null;
+    const label = document.getElementById('pin-label');
+    if (label) label.innerText = 'Pin to compare';
+    renderCompare();
+}
+
+async function copyLink() {
+    const payload = readFormPayload();
+    const params = new URLSearchParams();
+    params.set('lat', payload.latitude);
+    params.set('lng', payload.longitude);
+    params.set('hour', payload.hour);
+    ['weather', 'road_surface', 'light', 'age_band', 'speed_limit', 'vehicle_type', 'road_type', 'junction']
+        .forEach(k => { if (payload[k] !== undefined && payload[k] !== '') params.set(k, payload[k]); });
+    const url = window.location.origin + window.location.pathname + '?' + params.toString() + '#predict';
+    const label = document.getElementById('share-label');
+    let ok = false;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+            ok = true;
+        }
+    } catch (e) { ok = false; }
+    if (!ok) {
+        try {
+            const field = document.createElement('input');
+            field.value = url;
+            document.body.appendChild(field);
+            field.select();
+            ok = document.execCommand('copy');
+            field.remove();
+        } catch (e) { ok = false; }
+    }
+    if (label) {
+        label.innerText = ok ? 'Link copied' : 'Copy failed';
+        setTimeout(() => { label.innerText = 'Copy link'; }, 1800);
+    }
+}
+
+// ---- Scenario presets ----
+const PRESETS = {
+    rush: {
+        city: 'London, England', lat: 51.5074, lng: -0.1278, hour: 8,
+        light: 'Daylight', weather: 'Clear', surface: 'Dry', speed_limit: '30',
+        vehicle: 'Car', age: 'Adult (26-55)', road: 'Single carriageway', junction: 'T or staggered junction'
+    },
+    motorway: {
+        city: 'Birmingham, England', lat: 52.4862, lng: -1.8904, hour: 17,
+        light: 'Daylight', weather: 'Rain', surface: 'Wet or damp', speed_limit: '70',
+        vehicle: 'Car', age: 'Adult (26-55)', road: 'Dual carriageway', junction: 'Not at junction'
+    },
+    rural: {
+        city: 'Inverness, Scotland', lat: 57.4778, lng: -4.2247, hour: 22,
+        light: 'Dark (unlit)', weather: 'Clear', surface: 'Dry', speed_limit: '60',
+        vehicle: 'Car', age: 'Adult (26-55)', road: 'Single carriageway', junction: 'Not at junction'
+    },
+    weekend: {
+        city: 'Manchester, England', lat: 53.4808, lng: -2.2426, hour: 1,
+        light: 'Dark (lit)', weather: 'Clear', surface: 'Dry', speed_limit: '20',
+        vehicle: 'Taxi', age: 'Young (16-25)', road: 'One-way / Slip road', junction: 'Crossroads'
+    }
+};
+
+let ACTIVE_PRESET = null;
+
+function markPresetButtons() {
+    document.querySelectorAll('#preset-row .preset').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.preset === ACTIVE_PRESET);
+    });
+}
+
+function applyPreset(name) {
+    const p = PRESETS[name];
+    if (!p) return;
+    setCoords(p.lat, p.lng);
+    const city = document.getElementById('city-search');
+    if (city) city.value = p.city;
+    const hint = document.getElementById('city-hint');
+    if (hint) hint.innerText = p.city + ' · ' + p.lat.toFixed(3) + ', ' + p.lng.toFixed(3);
+    const hourEl = document.getElementById('hour');
+    if (hourEl) hourEl.value = p.hour;
+    setSeg('light', p.light);
+    setSeg('weather', p.weather);
+    setSeg('surface', p.surface);
+    setSeg('speed_limit', p.speed_limit);
+    setSeg('age_band', p.age);
+    const veh = document.getElementById('vehicle-type');
+    if (veh) veh.value = p.vehicle;
+    const road = document.getElementById('road-type');
+    if (road) road.value = p.road;
+    const junction = document.getElementById('junction');
+    if (junction) junction.value = p.junction;
+    ACTIVE_PRESET = name;
+    markPresetButtons();
+    refreshPredictor(0);
+}
+
+// ---- Control plumbing ----
+function setCoords(lat, lng) {
+    const a = document.getElementById('lat');
+    const b = document.getElementById('lng');
+    if (a) a.value = Number(lat).toFixed(4);
+    if (b) b.value = Number(lng).toFixed(4);
+}
+
+function matchCity() {
+    const input = document.getElementById('city-search');
+    const hint = document.getElementById('city-hint');
+    if (!input) return;
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+    const hit = UK_CITIES.find(c => c.name.toLowerCase() === q)
+        || UK_CITIES.find(c => c.name.toLowerCase().indexOf(q) === 0)
+        || UK_CITIES.find(c => c.name.toLowerCase().indexOf(q) >= 0);
+    if (hit) {
+        setCoords(hit.lat, hit.lng);
+        input.value = hit.name;
+        if (hint) hint.innerText = hit.name + ' · ' + hit.lat.toFixed(3) + ', ' + hit.lng.toFixed(3);
+    } else if (hint) {
+        hint.innerText = 'No match — coordinates left unchanged.';
+    }
+}
+
+function useMyLocation() {
+    const hint = document.getElementById('city-hint');
+    if (!navigator.geolocation) {
+        if (hint) hint.innerText = 'Location is not available in this browser.';
+        return;
+    }
+    if (hint) hint.innerText = 'Locating…';
+    navigator.geolocation.getCurrentPosition(
+        function (pos) {
+            setCoords(pos.coords.latitude, pos.coords.longitude);
+            const input = document.getElementById('city-search');
+            if (input) input.value = '';
+            if (hint) hint.innerText = 'Using your current position.';
+            refreshPredictor(0);
+        },
+        function () {
+            if (hint) hint.innerText = 'Could not get your location — coordinates unchanged.';
+        }
+    );
+}
+
+function updateHourReadout() {
+    const el = document.getElementById('hour');
+    if (!el) return;
+    const parsed = parseInt(el.value, 10);
+    const hour = Number.isFinite(parsed) ? parsed : 12;
+    const period = hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'night';
+    const read = document.getElementById('hour-read');
+    if (read) read.innerText = String(hour).padStart(2, '0') + ':00 · ' + period;
+    const mark = document.getElementById('day-arc-mark');
+    if (mark) mark.style.left = (hour / 23 * 100) + '%';
+
+    // Hour and light stay consistent; lit versus unlit stays the user's call.
+    const cur = segInput('light');
+    if (!cur) return;
+    const night = (hour < 6 || hour >= 18);
+    if (night && cur.value === 'Daylight') setSeg('light', 'Dark (lit)');
+    else if (!night && cur.value.indexOf('Dark') === 0) setSeg('light', 'Daylight');
+}
+
+function updateMoreState() {
+    const el = document.getElementById('more-state');
+    if (!el) return;
+    const shortOf = (id) => {
+        const sel = document.getElementById(id);
+        if (!sel) return '';
+        const opt = sel.options[sel.selectedIndex];
+        return opt ? (opt.dataset.short || opt.textContent) : '';
+    };
+    el.innerText = [shortOf('vehicle-type'), segValue('age_band'), shortOf('road-type'), shortOf('junction')]
+        .filter(Boolean).join(' · ');
+}
+
+function onPredictInput(e) {
+    const t = e && e.target;
+    if (t && t.type === 'radio' && t.name === 'light') {
+        const hourEl = document.getElementById('hour');
+        const h = hourEl ? parseInt(hourEl.value, 10) : 12;
+        if (hourEl && t.value.indexOf('Dark') === 0 && h >= 6 && h < 18) hourEl.value = 22;
+        if (hourEl && t.value === 'Daylight' && (h < 6 || h >= 18)) hourEl.value = 12;
+    }
+    ACTIVE_PRESET = null;
+    markPresetButtons();
+    refreshPredictor();
+}
+
+function applyQueryState() {
+    if (!window.location.search) return;
+    let params;
+    try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
+    const has = (k) => params.has(k) && params.get(k) !== '';
+    if (has('lat') && has('lng')) setCoords(parseFloat(params.get('lat')), parseFloat(params.get('lng')));
+    if (has('hour')) {
+        const el = document.getElementById('hour');
+        if (el) el.value = params.get('hour');
+    }
+    [['weather', 'weather'], ['road_surface', 'surface'], ['light', 'light'],
+     ['age_band', 'age_band'], ['speed_limit', 'speed_limit']].forEach(pair => {
+        if (has(pair[0])) setSeg(pair[1], params.get(pair[0]));
+    });
+    [['vehicle_type', 'vehicle-type'], ['road_type', 'road-type'], ['junction', 'junction']].forEach(pair => {
+        if (!has(pair[0])) return;
+        const el = document.getElementById(pair[1]);
+        if (el) el.value = params.get(pair[0]);
+    });
+}
+
+function initPredictor() {
+    const form = document.getElementById('prediction-form');
+    if (form) {
+        form.addEventListener('input', onPredictInput);
+        form.addEventListener('change', onPredictInput);
+    }
+    const presetRow = document.getElementById('preset-row');
+    if (presetRow) {
+        presetRow.addEventListener('click', (e) => {
+            const btn = e.target.closest ? e.target.closest('.preset') : null;
+            if (btn && btn.dataset.preset) applyPreset(btn.dataset.preset);
+        });
+    }
+    const loc = document.getElementById('use-location');
+    if (loc) loc.addEventListener('click', useMyLocation);
+    const pin = document.getElementById('pin-btn');
+    if (pin) pin.addEventListener('click', pinScenario);
+    const share = document.getElementById('share-btn');
+    if (share) share.addEventListener('click', copyLink);
+
+    applyQueryState();
+    updateHourReadout();
+    updateMoreState();
+    markPresetButtons();
+    scheduleAutoScore(0);
 }
 
 // Fetch served-model metrics and populate the dashboard stat cards and sidebar
@@ -733,18 +1165,17 @@ async function loadModelMetrics() {
     }
 }
 
-// Load UK cities dropdown with real coordinates, auto-fill lat/lng (read-only display)
+// Load UK cities into the searchable datalist, fill coordinates from a match
 let UK_CITIES = [];
 
 async function loadCities() {
-    const citySelect = document.getElementById('city');
-    const latInput = document.getElementById('lat');
-    const lngInput = document.getElementById('lng');
-    if (!citySelect) return;
+    const input = document.getElementById('city-search');
+    const list = document.getElementById('city-list');
+    if (!input) return;
 
     try {
         const response = await fetch('/static/uk_cities.json');
-        let cities = await response.json();
+        const cities = await response.json();
         if (!Array.isArray(cities)) throw new Error('bad format');
         cities.sort((a, b) => a.name.localeCompare(b.name));
         UK_CITIES = cities;
@@ -757,27 +1188,26 @@ async function loadCities() {
         ];
     }
 
-    citySelect.innerHTML = '';
-    UK_CITIES.forEach((c, idx) => {
-        const opt = document.createElement('option');
-        opt.value = idx;
-        opt.textContent = c.name;
-        citySelect.appendChild(opt);
-    });
+    if (list) {
+        list.innerHTML = '';
+        UK_CITIES.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name;
+            list.appendChild(opt);
+        });
+    }
 
-    const setCoords = () => {
-        const selected = UK_CITIES[parseInt(citySelect.value, 10)];
-        if (selected && latInput && lngInput) {
-            latInput.value = selected.lat;
-            lngInput.value = selected.lng;
+    input.addEventListener('change', matchCity);
+
+    if (!input.value) {
+        const london = UK_CITIES.find(c => c.name.indexOf('London') === 0) || UK_CITIES[0];
+        if (london) {
+            input.value = london.name;
+            setCoords(london.lat, london.lng);
+            const hint = document.getElementById('city-hint');
+            if (hint) hint.innerText = london.name + ' · ' + london.lat.toFixed(3) + ', ' + london.lng.toFixed(3);
         }
-    };
-    citySelect.addEventListener('change', setCoords);
-
-    // Default to London if present, else first city
-    const londonIdx = UK_CITIES.findIndex(c => c.name.startsWith('London'));
-    citySelect.value = String(londonIdx >= 0 ? londonIdx : 0);
-    setCoords();
+    }
 }
 
 // ---- Data insights: enlarge a chart card into a readable overlay ----
@@ -849,6 +1279,204 @@ function initChartModal() {
     });
 }
 
+// ---- Landing: the dial is real data, the copy cycles, both can be stilled ----
+const LANDING_PHRASES = ['hour by hour', 'after dark', 'on rural roads', 'in the wet'];
+let LANDING_CYCLE = null;
+
+function startHeadlineCycle() {
+    const host = document.getElementById('landing-cycle');
+    if (!host) return;
+    let i = 0;
+    const make = (text) => {
+        const span = document.createElement('span');
+        span.className = 'landing__cycle-word is-in';
+        span.innerText = text;
+        return span;
+    };
+    host.innerHTML = '';
+    host.appendChild(make(LANDING_PHRASES[0]));
+    LANDING_CYCLE = setInterval(() => {
+        const landing = document.getElementById('landing');
+        if (!landing || landing.hidden) { clearInterval(LANDING_CYCLE); LANDING_CYCLE = null; return; }
+        i = (i + 1) % LANDING_PHRASES.length;
+        const old = host.firstElementChild;
+        if (old) {
+            old.classList.remove('is-in');
+            old.classList.add('is-out');
+            setTimeout(() => { if (old.parentNode) old.parentNode.removeChild(old); }, 460);
+        }
+        host.appendChild(make(LANDING_PHRASES[i]));
+    }, 3400);
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svgEl(name, attrs) {
+    const el = document.createElementNS(SVG_NS, name);
+    Object.keys(attrs || {}).forEach(k => el.setAttribute(k, attrs[k]));
+    return el;
+}
+
+function polarPoint(cx, cy, r, deg) {
+    const rad = (deg - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+function arcPath(cx, cy, r, startDeg, endDeg) {
+    const a = polarPoint(cx, cy, r, startDeg);
+    const b = polarPoint(cx, cy, r, endDeg);
+    const large = (endDeg - startDeg) > 180 ? 1 : 0;
+    return 'M ' + a[0].toFixed(2) + ' ' + a[1].toFixed(2)
+        + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + b[0].toFixed(2) + ' ' + b[1].toFixed(2);
+}
+
+// Three-hour windows, matching the bins the pipeline builds
+const DIAL_BINS = [
+    ['12 AM', '00:00–03:00'], ['3 AM', '03:00–06:00'], ['6 AM', '06:00–09:00'], ['9 AM', '09:00–12:00'],
+    ['12 PM', '12:00–15:00'], ['3 PM', '15:00–18:00'], ['6 PM', '18:00–21:00'], ['9 PM', '21:00–24:00']
+];
+const DIAL_TIER = ['#5fb98a', '#d7a154', '#e2796f'];
+
+function drawIn(path, index) {
+    if (typeof path.getTotalLength !== 'function' || typeof requestAnimationFrame !== 'function') return;
+    let len = 0;
+    try { len = path.getTotalLength(); } catch (e) { return; }
+    if (!len) return;
+    path.style.strokeDasharray = len;
+    path.style.strokeDashoffset = len;
+    path.style.transition = 'stroke-dashoffset .9s ease ' + (index * 70) + 'ms';
+    requestAnimationFrame(() => { path.style.strokeDashoffset = 0; });
+}
+
+function renderLandingDial(data) {
+    const svg = document.getElementById('landing-dial');
+    if (!svg) return;
+    Array.prototype.slice.call(svg.querySelectorAll('g')).forEach(node => node.remove());
+    const g = svgEl('g', {});
+    svg.appendChild(g);
+
+    const cx = 160, cy = 160, rInner = 97, wMin = 10, wMax = 33;
+    const hourSev = (data && data.hour_severity) ? data.hour_severity : null;
+    const values = DIAL_BINS.map(bin => {
+        const s = hourSev ? hourSev[bin[0]] : null;
+        return s ? (Number(s.Serious) || 0) + (Number(s.Fatal) || 0) : 0;
+    });
+    const peak = values.reduce((best, v, i) => (v > values[best] ? i : best), 0);
+    const lo = Math.min.apply(null, values);
+    const hi = Math.max.apply(null, values);
+    const span = (hi - lo) || 1;
+
+    g.appendChild(svgEl('circle', {
+        cx: cx, cy: cy, r: rInner + wMax / 2, fill: 'none',
+        stroke: '#1d242c', 'stroke-width': wMax
+    }));
+
+    const slot = 360 / DIAL_BINS.length;
+    values.forEach((v, i) => {
+        const t = (v - lo) / span;
+        const weight = wMin + (wMax - wMin) * t;
+        const tier = t > 0.66 ? 2 : (t > 0.33 ? 1 : 0);
+        const path = svgEl('path', {
+            d: arcPath(cx, cy, rInner + weight / 2, i * slot + 2.5, (i + 1) * slot - 2.5),
+            fill: 'none', stroke: DIAL_TIER[tier], 'stroke-width': weight, 'stroke-linecap': 'butt'
+        });
+        g.appendChild(path);
+        drawIn(path, i);
+    });
+
+    // 24 hour ticks, the current one picked out
+    const nowHour = new Date().getHours();
+    for (let h = 0; h < 24; h++) {
+        const major = h % 3 === 0;
+        const a = polarPoint(cx, cy, major ? 84 : 87, h * 15);
+        const b = polarPoint(cx, cy, 76, h * 15);
+        g.appendChild(svgEl('line', {
+            x1: a[0].toFixed(1), y1: a[1].toFixed(1), x2: b[0].toFixed(1), y2: b[1].toFixed(1),
+            stroke: h === nowHour ? '#9cc6ee' : '#39424c',
+            'stroke-width': h === nowHour ? 2.4 : (major ? 1.4 : 1)
+        }));
+    }
+
+    // A slow sweep, like a clock hand
+    const sweep = svgEl('line', {
+        x1: cx, y1: cy, x2: cx, y2: cy - 74,
+        stroke: '#6ba3dd', 'stroke-width': 1.4, opacity: 0.5, 'stroke-linecap': 'round',
+        'class': 'dial-sweep'
+    });
+    g.appendChild(sweep);
+
+    const centre = (offsetY, text, size, fill, weight) => {
+        const t = svgEl('text', {
+            x: cx, y: cy + offsetY, 'text-anchor': 'middle', fill: fill,
+            'font-size': size, 'font-family': 'Inter, system-ui, sans-serif',
+            'font-weight': weight || 400,
+            style: 'font-variant-numeric: tabular-nums lining-nums'
+        });
+        t.textContent = text;
+        g.appendChild(t);
+    };
+    centre(-42, 'PEAK WINDOW', 10, '#7d8894');
+    centre(-22, DIAL_BINS[peak][1], 13, '#cdd5dd');
+    centre(10, values[peak].toFixed(1) + '%', 32, '#ffffff', 600);
+    centre(28, 'serious or fatal', 10.5, '#98a2ad');
+
+    const cap = document.getElementById('landing-dial-cap');
+    if (cap && values[peak] && data && data.totals) {
+        cap.innerText = 'Peak ' + DIAL_BINS[peak][1] + ' · ' + values[peak].toFixed(1)
+            + '% serious or fatal, against ' + data.totals.high_sev_pct + '% overall';
+    }
+}
+
+function dismissLanding(instant) {
+    const landing = document.getElementById('landing');
+    if (!landing || landing.hidden) return;
+    try { sessionStorage.setItem('roadsafe-entered', '1'); } catch (e) {}
+    if (LANDING_CYCLE) { clearInterval(LANDING_CYCLE); LANDING_CYCLE = null; }
+    const finish = () => {
+        landing.hidden = true;
+        landing.classList.remove('is-leaving');
+        if (window.mapInstance && window.mapInstance.invalidateSize) {
+            setTimeout(() => window.mapInstance.invalidateSize(), 60);
+        }
+        const nav = document.getElementById('nav-dashboard');
+        if (nav) nav.focus();
+    };
+    if (instant) { finish(); return; }
+    landing.classList.add('is-leaving');
+    setTimeout(finish, 460);
+}
+
+function initLanding() {
+    const landing = document.getElementById('landing');
+    if (!landing) return;
+    const startBtn = document.getElementById('landing-start');
+    const skipBtn = document.getElementById('landing-skip');
+
+    let seen = false;
+    try { seen = sessionStorage.getItem('roadsafe-entered') === '1'; } catch (e) {}
+    const deepLink = /#(dashboard|analytics|predict|hotspots)/.test(window.location.hash);
+    if (seen || deepLink) { dismissLanding(true); return; }
+
+    landing.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { dismissLanding(); return; }
+        if (e.key !== 'Tab') return;
+        const focusables = Array.prototype.slice.call(landing.querySelectorAll('button'));
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    if (startBtn) startBtn.addEventListener('click', () => dismissLanding());
+    if (skipBtn) skipBtn.addEventListener('click', () => dismissLanding());
+
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced) startHeadlineCycle();
+    if (startBtn) startBtn.focus();
+
+    getDash().then(data => renderLandingDial(data));
+}
+
 // Set live clock and initialize components on window load
 window.onload = function() {
     // Restore saved theme, or follow the OS preference on first visit
@@ -871,11 +1499,13 @@ window.onload = function() {
     updateClock();
     setInterval(updateClock, 1000);
 
+    initLanding();
     initCharts();
     initMap();
     initChartModal();
     loadModelMetrics();
-    loadCities();
+    // The predictor needs the city list before it can apply a shared link
+    loadCities().then(initPredictor);
 
     // Keep sidebar state correct when resizing between mobile and desktop
     window.addEventListener('resize', () => {
@@ -888,16 +1518,4 @@ window.onload = function() {
             closeSidebar();
         }
     });
-
-    // Keep Light and Hour consistent: picking darkness implies night.
-    const lightSel = document.getElementById('light');
-    const hourInput = document.getElementById('hour');
-    if (lightSel && hourInput) {
-        lightSel.addEventListener('change', () => {
-            const v = lightSel.value;
-            const h = parseInt(hourInput.value, 10);
-            if (v.startsWith('Dark') && h >= 6 && h < 18) hourInput.value = 22;
-            if (v === 'Daylight' && (h < 6 || h >= 18)) hourInput.value = 12;
-        });
-    }
 };

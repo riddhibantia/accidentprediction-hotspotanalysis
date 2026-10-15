@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Accident severity prediction and high-risk road-area analysis for Great Britain, built on the DfT STATS19 2023 collision records.">
-    <title>RoadSafe AI — UK road safety analysis</title>
+    <title>RoadSafe Analytics — UK road safety analysis</title>
 
     <!-- Tailwind: layout utilities only (colour and type come from the token layer below) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -53,6 +53,13 @@
             --r-card: 8px;
             --r-ctl: 6px;
             --shadow: 0 1px 2px rgba(20, 24, 29, .05);
+
+            /* Landing only: it is always the night-road panel */
+            --landing-ink: #e8eaed;
+            --landing-soft: #cdd5dd;
+            --landing-dim: #98a2ad;
+            --landing-faint: #6b7580;
+            --landing-accent: #6ba3dd;
         }
         html.dark {
             --ink: #e8eaed;
@@ -120,7 +127,6 @@
         /* Colour helpers */
         .fg-ink { color: var(--ink); }
         .fg-muted { color: var(--muted); }
-        .fg-brand { color: var(--brand); }
         .fg-fatal { color: var(--fatal); }
         .fg-serious { color: var(--serious); }
         .fg-slight { color: var(--slight); }
@@ -293,10 +299,7 @@
         .seg button.is-active { background: var(--brand-tint); color: var(--brand); }
 
         /* Form */
-        .form-grid { display: grid; grid-template-columns: 1fr; gap: 20px 24px; }
-        @media (min-width: 768px) { .form-grid { grid-template-columns: 1fr 1fr; } }
         .field-group { display: flex; flex-direction: column; }
-        .field-group.wide { grid-column: 1 / -1; }
         .field-label { color: var(--ink); font-weight: 500; font-size: 14px; line-height: 1.2; margin-bottom: 7px; }
         .field {
             width: 100%; background: var(--paper); color: var(--ink);
@@ -314,14 +317,10 @@
             display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
             font-weight: 600; font-size: 12px; line-height: 1.2; border: 1px solid transparent;
         }
-        .result-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-        @media (min-width: 768px) { .result-grid { grid-template-columns: repeat(3, 1fr); } }
         .badge-slight { background: var(--slight-tint); color: var(--slight); border-color: var(--slight); }
         .badge-serious { background: var(--serious-tint); color: var(--serious); border-color: var(--serious); }
         .badge-fatal { background: var(--fatal-tint); color: var(--fatal); border-color: var(--fatal); }
         .badge-neutral { background: var(--canvas); color: var(--muted); border-color: var(--rule-strong); }
-        .result-cell { background: var(--canvas); border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px; text-align: center; }
-        .result-cell .t-heading-md { margin: 8px 0 2px; }
         .result-label { color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.67; }
         .result-sub { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 4px; }
 
@@ -404,7 +403,6 @@
         .control-group { display: flex; align-items: center; gap: 10px; }
         .control-label { color: var(--muted); font-size: 12px; line-height: 1.67; white-space: nowrap; }
         .control-group.end { margin-left: auto; }
-        .field-sm { padding: 8px 10px; font-size: 14px; line-height: 1.43; }
         select.field { cursor: pointer; }
 
         /* ============================================================
@@ -510,11 +508,238 @@
         .loc-item .meta { color: var(--muted); font-size: 12px; line-height: 1.67; margin-top: 3px; }
 
         /* ============================================================
+           Landing: the night-road front door
+           ============================================================ */
+        .landing {
+            position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+            background: radial-gradient(125% 95% at 50% 0%, #16202b 0%, #0e1116 58%, #090c10 100%);
+            color: var(--landing-ink); overflow: hidden;
+            transition: opacity .45s ease, transform .45s ease;
+        }
+        .landing[hidden] { display: none; }
+        .landing.is-leaving { opacity: 0; transform: scale(1.015); pointer-events: none; }
+
+        /* Drifting lane markings: the centre-line rule, at road scale */
+        .landing__lanes { position: absolute; inset: -30%; pointer-events: none; }
+        .landing__lanes::before,
+        .landing__lanes::after {
+            content: ''; position: absolute; inset: 0;
+            background-image: repeating-linear-gradient(112deg,
+                rgba(255, 255, 255, .065) 0 2px, transparent 2px 40px);
+            animation: laneDrift 38s linear infinite;
+        }
+        .landing__lanes::after {
+            background-image: repeating-linear-gradient(112deg,
+                rgba(107, 163, 221, .11) 0 2px, transparent 2px 132px);
+            animation-duration: 64s; animation-direction: reverse;
+        }
+        @keyframes laneDrift { to { background-position: 1400px 0; } }
+
+        .landing__top {
+            position: relative; z-index: 2; flex: 0 0 auto;
+            height: 68px; padding: 0 28px; display: flex; align-items: center;
+            justify-content: space-between; gap: 16px;
+        }
+        .landing__brand { display: inline-flex; align-items: center; gap: 11px; color: var(--landing-ink); }
+        .landing__mark {
+            width: 32px; height: 32px; border-radius: 7px; flex: 0 0 auto;
+            background: var(--landing-accent); color: #0b1015;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .landing__skip {
+            background: transparent; border: 0; cursor: pointer; padding: 8px 4px;
+            color: var(--landing-dim); font-family: var(--font-sans); font-size: 13px;
+        }
+        .landing__skip:hover { color: var(--landing-ink); }
+
+        .landing__wrap {
+            position: relative; z-index: 2; flex: 1; min-height: 0; overflow-y: auto;
+            width: 100%; max-width: 1180px; margin: 0 auto;
+            display: grid; grid-template-columns: minmax(0, 1fr); align-content: center;
+            gap: 36px; padding: 20px 28px 56px;
+        }
+        @media (min-width: 1024px) {
+            .landing__wrap {
+                grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+                align-items: center; gap: 48px; padding: 20px 40px 72px;
+            }
+        }
+        .landing__copy { display: flex; flex-direction: column; gap: 16px; max-width: 620px; }
+        .landing__eyebrow { color: var(--landing-dim); margin: 0; }
+        .landing__name { color: #fff; margin: 0; }
+        .landing__lede { color: var(--landing-soft); margin: 0; }
+        /* Only the outgoing word leaves the flow, so each phrase sets its own width */
+        .landing__cycle {
+            position: relative; display: inline-block; overflow: hidden;
+            height: 1.375em; vertical-align: bottom;
+        }
+        .landing__cycle-word { display: inline-block; white-space: nowrap; color: var(--landing-accent); }
+        .landing__cycle-word.is-in { animation: cycleIn .42s ease; }
+        .landing__cycle-word.is-out { position: absolute; left: 0; top: 0; animation: cycleOut .42s ease forwards; }
+        @keyframes cycleIn { from { transform: translateY(115%); opacity: 0; } }
+        @keyframes cycleOut { to { transform: translateY(-115%); opacity: 0; } }
+        .landing__sub { color: var(--landing-dim); margin: 0; max-width: 54ch; }
+        .landing__go {
+            align-self: flex-start; margin-top: 6px;
+            display: inline-flex; align-items: center; gap: 12px;
+            background: var(--landing-accent); color: #0b1015; border: 0; cursor: pointer;
+            font-family: var(--font-sans); font-weight: 600; font-size: 15px; line-height: 1.2;
+            padding: 15px 22px; border-radius: var(--r-ctl);
+            transition: background-color .18s ease, gap .18s ease;
+        }
+        .landing__go:hover { background: #9cc6ee; gap: 16px; }
+        .landing__go:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+        .landing__fine { color: var(--landing-faint); margin: 0; }
+
+        .landing__dial { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+        .landing__dial svg { width: min(370px, 76vw); height: auto; overflow: visible; }
+        .landing__dial-cap { color: var(--landing-faint); text-align: center; }
+        .dial-sweep { transform-origin: 160px 160px; animation: dialSweep 48s linear infinite; }
+        @keyframes dialSweep { to { transform: rotate(360deg); } }
+
+        /* ============================================================
+           Severity predictor: live assessment panel
+           ============================================================ */
+        .predict-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+        @media (min-width: 1100px) {
+            .predict-grid { grid-template-columns: minmax(0, 1fr) minmax(352px, 408px); }
+        }
+        .predict-form { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+        .predict-out { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+        @media (min-width: 1100px) { .predict-out { position: sticky; top: 0; } }
+
+        .preset-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .preset {
+            background: var(--canvas); border: 1px solid var(--rule-strong); border-radius: 999px;
+            color: var(--ink); cursor: pointer; padding: 8px 14px;
+            font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2;
+            transition: border-color .15s ease, background-color .15s ease, color .15s ease;
+        }
+        .preset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); }
+        .preset.is-active { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); }
+
+        .field-stack { display: flex; flex-direction: column; gap: 18px; }
+        .field-row { display: flex; gap: 8px; align-items: center; }
+        .field-row .field { min-width: 0; }
+        .btn-compact { flex: 0 0 auto; padding: 11px 12px; }
+
+        /* Segmented choice: native radios, styled as one control */
+        .seg-field {
+            position: relative; display: flex; border: 1px solid var(--rule-strong);
+            border-radius: var(--r-ctl); overflow: hidden; background: var(--paper);
+        }
+        .seg-field input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        .seg-field label {
+            flex: 1 1 0; min-width: 0; text-align: center; cursor: pointer;
+            padding: 11px 6px; background: var(--paper); color: var(--muted);
+            border-right: 1px solid var(--rule); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+            font-family: var(--font-sans); font-weight: 500; font-size: 14px; line-height: 1.2;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .seg-field label:last-of-type { border-right: 0; }
+        .seg-field label:hover { background: var(--canvas); color: var(--ink); }
+        .seg-field input:checked + label { background: var(--brand-tint); color: var(--brand); font-weight: 600; }
+        .seg-field input:focus-visible + label { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+        .range { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; cursor: pointer; }
+        .range::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--rule); }
+        .range::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -8px;
+            border-radius: 50%; background: var(--brand); border: 2px solid var(--paper); box-shadow: var(--shadow);
+        }
+        .range::-moz-range-track { height: 6px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--rule); }
+        .range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--brand); border: 2px solid var(--paper); }
+        .range:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; }
+
+        .day-arc {
+            position: relative; display: flex; height: 8px; margin-top: 2px;
+            border: 1px solid var(--rule); border-radius: 999px; overflow: hidden;
+        }
+        .day-arc__band { display: block; }
+        .day-arc__band[data-band="night"] { background: var(--canvas); }
+        .day-arc__band[data-band="morning"],
+        .day-arc__band[data-band="afternoon"] { background: var(--rule); }
+        .day-arc__mark {
+            position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px;
+            background: var(--brand); transform: translateX(-1px); transition: left .12s ease;
+        }
+
+        .more { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule); }
+        .more > summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+        .more > summary::-webkit-details-marker { display: none; }
+        .more__title { display: inline-flex; align-items: center; gap: 9px; }
+        .more__chev { color: var(--muted); font-size: 12px; transition: transform .18s ease; }
+        .more[open] .more__chev { transform: rotate(90deg); }
+        .more__state { color: var(--muted); }
+
+        .form-actions { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+
+        .assess-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+        .assess-verdict {
+            font-family: var(--font-serif); font-weight: 400; font-size: 34px; line-height: 1.12;
+            letter-spacing: 0; margin: 6px 0 0;
+        }
+        .assess-conf { text-align: right; flex: 0 0 auto; }
+        .assess-conf-v {
+            margin: 6px 0 0; color: var(--brand);
+            font-family: var(--font-sans); font-weight: 600; font-size: 28px; line-height: 1.1; letter-spacing: 0;
+            font-variant-numeric: tabular-nums lining-nums;
+        }
+        .prob-block, .context-block, .hotspot-block { border-top: 1px solid var(--rule); padding-top: 20px; margin-top: 22px; }
+
+        .context-list { display: flex; flex-direction: column; gap: 11px; }
+        .ctx { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; }
+        .ctx__name { color: var(--ink); font-size: 13px; line-height: 1.35; min-width: 0; }
+        .ctx__name b { font-weight: 600; }
+        .ctx__val {
+            color: var(--ink); font-size: 13px; line-height: 1.35; font-weight: 600;
+            text-align: right; white-space: nowrap;
+            font-variant-numeric: tabular-nums lining-nums;
+        }
+        .ctx__delta { font-weight: 600; font-size: 11px; margin-left: 5px; }
+        .ctx__delta.up { color: var(--fatal); }
+        .ctx__delta.down { color: var(--slight); }
+        .ctx__delta.flat { color: var(--muted); }
+        .ctx__track {
+            grid-column: 1 / -1; position: relative; height: 6px; border-radius: 999px;
+            background: var(--canvas); border: 1px solid var(--rule); overflow: hidden;
+        }
+        .ctx__fill { height: 100%; background: var(--brand); transition: width .45s ease; }
+        .ctx__base { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--muted); }
+
+        .assess-actions { display: flex; gap: 8px; margin-top: 20px; }
+        .assess-actions .btn { flex: 1 1 0; }
+
+        .compare { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule); }
+        .compare.hidden { display: none; }
+        .compare-row {
+            display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 10px;
+            align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--rule);
+        }
+        .compare-row:last-child { border-bottom: 0; }
+        .compare-delta { font-weight: 600; font-size: 12px; font-variant-numeric: tabular-nums lining-nums; }
+        .compare-delta.up { color: var(--fatal); }
+        .compare-delta.down { color: var(--slight); }
+        .compare-delta.flat { color: var(--muted); }
+        .link-btn { background: none; border: 0; padding: 0; color: var(--brand); cursor: pointer; font: inherit; }
+        .link-btn:hover { text-decoration: underline; }
+
+        .assess-status {
+            display: inline-flex; align-items: center; gap: 7px;
+            color: var(--muted); font-size: 12px; line-height: 1.67;
+        }
+        .assess-status.hidden { display: none; }
+        #prediction-result.is-scoring .assess-hero,
+        #prediction-result.is-scoring .prob-block,
+        #prediction-result.is-scoring .context-block { opacity: .5; transition: opacity .15s ease; }
+
+        /* ============================================================
            Print: one-page report only
            ============================================================ */
         .print-only { display: none; }
         @media print {
-            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop { display: none !important; }
+            .rail, .topbar, .skip-link, .no-print, .seg, .site-footer, .dash-map, .chart-modal, #sidebar-backdrop, .landing { display: none !important; }
             .app { display: block; height: auto; width: auto; overflow: visible; }
             .main, .page { display: block; height: auto; overflow: visible; }
             .page-inner { max-width: none; padding: 0; gap: 14px; }
@@ -529,6 +754,46 @@
 
     <a class="skip-link" href="#main">Skip to content</a>
 
+    <!-- ===================== LANDING ===================== -->
+    <div id="landing" class="landing" role="dialog" aria-modal="true" aria-labelledby="landing-name">
+        <div class="landing__lanes" aria-hidden="true"></div>
+
+        <div class="landing__top">
+            <span class="landing__brand">
+                <span class="landing__mark"><i class="fa-solid fa-road" aria-hidden="true"></i></span>
+                <span class="t-label-strong">RoadSafe Analytics</span>
+            </span>
+            <button type="button" class="landing__skip" id="landing-skip">Skip to dashboard</button>
+        </div>
+
+        <div class="landing__wrap">
+            <div class="landing__copy">
+                <p class="landing__eyebrow t-caption">DfT STATS19 · Great Britain · 2023</p>
+                <h1 id="landing-name" class="landing__name t-display-serif-xl">RoadSafe Analytics</h1>
+                <p class="landing__lede t-display-sans-md">
+                    Collision risk, mapped
+                    <span class="landing__cycle" id="landing-cycle"><span class="landing__cycle-word">hour by hour</span></span>
+                </p>
+                <p class="landing__sub t-body-loose">
+                    Severity assessment and high-risk area analysis for Great Britain,
+                    built from all 104,246 recorded collisions of 2023.
+                </p>
+                <button type="button" class="landing__go" id="landing-start">
+                    <span>Open the console</span>
+                    <i class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
+                </button>
+                <p class="landing__fine t-caption">Estimates from recorded collision data. Not driving advice.</p>
+            </div>
+
+            <figure class="landing__dial">
+                <svg id="landing-dial" viewBox="0 0 320 320" role="img" aria-labelledby="landing-dial-title">
+                    <title id="landing-dial-title">Serious-or-fatal share of recorded collisions, by three-hour window</title>
+                </svg>
+                <figcaption class="landing__dial-cap t-caption" id="landing-dial-cap">Serious or fatal share, by three-hour window</figcaption>
+            </figure>
+        </div>
+    </div>
+
     <div class="app">
 
         <!-- Navigation rail -->
@@ -536,7 +801,7 @@
             <div class="rail-brand">
                 <span class="rail-mark"><i class="fa-solid fa-road"></i></span>
                 <div>
-                    <span class="rail-name t-heading-md">RoadSafe AI</span>
+                    <span class="rail-name t-heading-md">RoadSafe Analytics</span>
                     <span class="rail-sub t-caption">UK road safety analysis</span>
                 </div>
             </div>
@@ -714,172 +979,242 @@
                     <div id="tab-predict" class="hidden flex flex-col gap-6">
                         <header class="page-head">
                             <p class="t-caption fg-muted">Severity assessment</p>
-                            <h2 class="t-display-serif-md">Collision severity assessment</h2>
-                            <p class="t-body fg-muted">Enter the conditions at the scene. The model returns Slight, Serious or Fatal with probabilities, trained on 2023 UK collision records.</p>
+                            <h2 class="t-display-serif-md">What the conditions suggest</h2>
+                            <p class="t-body fg-muted">Set the conditions at the scene. The assessment re-scores as you change them, and shows how each condition behaves across the 2023 collision records.</p>
                         </header>
                         <div class="rule-dashed"></div>
 
-                        <div class="card card-pad">
-                            <form id="prediction-form" onsubmit="handlePrediction(event)" class="form-grid">
-                                <div class="field-group wide">
-                                    <label class="field-label" for="city">City or area</label>
-                                    <select id="city" class="field">
-                                        <option value="">Loading cities…</option>
-                                    </select>
-                                    <p class="field-hint">Coordinates fill automatically from the selected UK city.</p>
+                        <div class="predict-grid">
+                            <form id="prediction-form" onsubmit="handlePrediction(event)" class="predict-form">
+                                <div class="card card-pad">
+                                    <div class="section-head" style="margin-bottom:14px">
+                                        <p class="t-label-strong fg-ink" style="margin:0">Start from a scenario</p>
+                                        <span class="t-caption fg-muted">then adjust anything</span>
+                                    </div>
+                                    <div class="preset-row" id="preset-row">
+                                        <button type="button" class="preset" data-preset="rush">Urban rush hour</button>
+                                        <button type="button" class="preset" data-preset="motorway">Motorway, wet</button>
+                                        <button type="button" class="preset" data-preset="rural">Rural after dark</button>
+                                        <button type="button" class="preset" data-preset="weekend">Weekend city centre</button>
+                                    </div>
                                 </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="lat">Latitude</label>
-                                    <input type="number" step="any" id="lat" value="51.5074" readonly class="field">
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="lng">Longitude</label>
-                                    <input type="number" step="any" id="lng" value="-0.1278" readonly class="field">
-                                </div>
+                                <div class="card card-pad">
+                                    <div class="field-stack">
+                                        <div class="field-group">
+                                            <label class="field-label" for="city-search">City or area</label>
+                                            <div class="field-row">
+                                                <input type="text" id="city-search" list="city-list" class="field" placeholder="Start typing a town or city" autocomplete="off">
+                                                <datalist id="city-list"></datalist>
+                                                <button type="button" id="use-location" class="btn btn-ghost btn-compact" title="Use my current location">
+                                                    <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i><span>Here</span>
+                                                </button>
+                                            </div>
+                                            <p class="field-hint" id="city-hint">Coordinates fill in from the nearest match.</p>
+                                        </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="weather">Weather</label>
-                                    <select id="weather" class="field">
-                                        <option value="Clear">Clear / dry</option>
-                                        <option value="Rain">Rain / wet</option>
-                                        <option value="Fog">Fog / mist</option>
-                                        <option value="Snow">Snow</option>
-                                    </select>
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="surface">Road surface</label>
-                                    <select id="surface" class="field">
-                                        <option value="Dry">Dry</option>
-                                        <option value="Wet or damp">Wet or damp</option>
-                                        <option value="Frost or ice">Frost or ice</option>
-                                        <option value="Snow">Snow</option>
-                                    </select>
-                                </div>
+                                        <div class="field-group">
+                                            <span class="field-label" id="lbl-coords">Coordinates</span>
+                                            <div class="field-row">
+                                                <input type="number" step="any" id="lat" value="51.5074" class="field" aria-label="Latitude" aria-labelledby="lbl-coords">
+                                                <input type="number" step="any" id="lng" value="-0.1278" class="field" aria-label="Longitude" aria-labelledby="lbl-coords">
+                                            </div>
+                                            <p id="coords-error" class="field-error hidden">Latitude -90 to 90, longitude -180 to 180.</p>
+                                        </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="hour">Hour of day (0–23)</label>
-                                    <input type="number" id="hour" value="12" min="0" max="23" class="field">
-                                    <p id="hour-hint" class="field-error hidden">Hour must be 0–23.</p>
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="vehicle-type">Vehicle type</label>
-                                    <select id="vehicle-type" class="field">
-                                        <option value="Car">Car</option>
-                                        <option value="Van">Van</option>
-                                        <option value="Motorcycle">Motorcycle</option>
-                                        <option value="Pedal cycle">Pedal cycle</option>
-                                        <option value="Bus/Coach">Bus / coach</option>
-                                        <option value="Taxi">Taxi</option>
-                                        <option value="HGV">HGV (over 7.5t)</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                </div>
+                                        <div class="field-group">
+                                            <label class="field-label" for="hour">Hour of day</label>
+                                            <input type="range" id="hour" value="12" min="0" max="23" step="1" class="range" aria-describedby="hour-read">
+                                            <div class="day-arc" aria-hidden="true">
+                                                <span class="day-arc__band" data-band="night" style="flex:6"></span>
+                                                <span class="day-arc__band" data-band="morning" style="flex:6"></span>
+                                                <span class="day-arc__band" data-band="afternoon" style="flex:6"></span>
+                                                <span class="day-arc__band" data-band="night" style="flex:6"></span>
+                                                <span class="day-arc__mark" id="day-arc-mark"></span>
+                                            </div>
+                                            <p class="field-hint" id="hour-read">12:00 · afternoon</p>
+                                        </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="age-band">Driver age band</label>
-                                    <select id="age-band" class="field">
-                                        <option value="Adult (26-55)">Adult (26–55)</option>
-                                        <option value="Young (16-25)">Young (16–25)</option>
-                                        <option value="Older (56+)">Older (56+)</option>
-                                        <option value="Unknown">Unknown</option>
-                                    </select>
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="light">Light conditions</label>
-                                    <select id="light" class="field">
-                                        <option value="Daylight">Daylight</option>
-                                        <option value="Dark (lit)">Dark — street lights lit</option>
-                                        <option value="Dark (unlit)">Dark — unlit / no lighting</option>
-                                        <option value="Unknown">Unknown</option>
-                                    </select>
-                                </div>
+                                        <div class="field-group">
+                                            <span class="field-label" id="lbl-light">Light</span>
+                                            <div class="seg-field" role="radiogroup" aria-labelledby="lbl-light" data-name="light">
+                                                <input type="radio" name="light" id="light-day" value="Daylight" checked><label for="light-day">Daylight</label>
+                                                <input type="radio" name="light" id="light-lit" value="Dark (lit)"><label for="light-lit">Lit</label>
+                                                <input type="radio" name="light" id="light-unlit" value="Dark (unlit)"><label for="light-unlit">Unlit</label>
+                                                <input type="radio" name="light" id="light-unk" value="Unknown"><label for="light-unk">Unknown</label>
+                                            </div>
+                                        </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="road-type">Road type</label>
-                                    <select id="road-type" class="field">
-                                        <option value="Single carriageway">Single carriageway</option>
-                                        <option value="Dual carriageway">Dual carriageway</option>
-                                        <option value="Roundabout">Roundabout</option>
-                                        <option value="One-way / Slip road">One-way / slip road</option>
-                                        <option value="Unknown">Unknown</option>
-                                    </select>
-                                </div>
-                                <div class="field-group">
-                                    <label class="field-label" for="junction">Junction</label>
-                                    <select id="junction" class="field">
-                                        <option value="Not at junction">Not at junction (or within 20 m)</option>
-                                        <option value="T or staggered junction">T or staggered junction</option>
-                                        <option value="Crossroads">Crossroads</option>
-                                        <option value="More than 4 arms">More than 4 arms</option>
-                                        <option value="Private drive or entrance">Private drive or entrance</option>
-                                        <option value="Other junction">Other junction</option>
-                                    </select>
-                                </div>
+                                        <div class="field-group">
+                                            <span class="field-label" id="lbl-weather">Weather</span>
+                                            <div class="seg-field" role="radiogroup" aria-labelledby="lbl-weather" data-name="weather">
+                                                <input type="radio" name="weather" id="wx-clear" value="Clear" checked><label for="wx-clear">Clear</label>
+                                                <input type="radio" name="weather" id="wx-rain" value="Rain"><label for="wx-rain">Rain</label>
+                                                <input type="radio" name="weather" id="wx-fog" value="Fog"><label for="wx-fog">Fog</label>
+                                                <input type="radio" name="weather" id="wx-snow" value="Snow"><label for="wx-snow">Snow</label>
+                                            </div>
+                                        </div>
 
-                                <div class="field-group">
-                                    <label class="field-label" for="speed">Speed limit (mph)</label>
-                                    <input type="number" id="speed" value="30" min="5" max="90" step="5" class="field">
-                                    <p id="speed-hint" class="field-error hidden">Speed limit must be 5–90 mph.</p>
-                                </div>
+                                        <div class="field-group">
+                                            <span class="field-label" id="lbl-surface">Road surface</span>
+                                            <div class="seg-field" role="radiogroup" aria-labelledby="lbl-surface" data-name="surface">
+                                                <input type="radio" name="surface" id="sf-dry" value="Dry" checked><label for="sf-dry">Dry</label>
+                                                <input type="radio" name="surface" id="sf-wet" value="Wet or damp"><label for="sf-wet">Wet</label>
+                                                <input type="radio" name="surface" id="sf-ice" value="Frost or ice"><label for="sf-ice">Ice</label>
+                                                <input type="radio" name="surface" id="sf-snow" value="Snow"><label for="sf-snow">Snow</label>
+                                            </div>
+                                        </div>
 
-                                <div class="field-group wide" style="padding-top:6px">
-                                    <button type="submit" id="run-btn" class="btn btn-primary btn-block" style="padding:15px 16px">
-                                        <i id="run-btn-icon" class="fa-solid fa-arrow-right-long"></i>
-                                        <span id="run-btn-label">Run prediction</span>
-                                    </button>
+                                        <div class="field-group">
+                                            <span class="field-label" id="lbl-speed">Speed limit</span>
+                                            <div class="seg-field" role="radiogroup" aria-labelledby="lbl-speed" data-name="speed_limit">
+                                                <input type="radio" name="speed_limit" id="sp-20" value="20"><label for="sp-20">20</label>
+                                                <input type="radio" name="speed_limit" id="sp-30" value="30" checked><label for="sp-30">30</label>
+                                                <input type="radio" name="speed_limit" id="sp-40" value="40"><label for="sp-40">40</label>
+                                                <input type="radio" name="speed_limit" id="sp-50" value="50"><label for="sp-50">50</label>
+                                                <input type="radio" name="speed_limit" id="sp-60" value="60"><label for="sp-60">60</label>
+                                                <input type="radio" name="speed_limit" id="sp-70" value="70"><label for="sp-70">70</label>
+                                            </div>
+                                            <p class="field-hint">mph</p>
+                                        </div>
+                                    </div>
+
+                                    <details class="more" id="more-detail">
+                                        <summary>
+                                            <span class="more__title">
+                                                <i class="fa-solid fa-chevron-right more__chev" aria-hidden="true"></i>
+                                                <span class="t-label-strong fg-ink">Vehicle and road detail</span>
+                                            </span>
+                                            <span class="more__state t-caption" id="more-state"></span>
+                                        </summary>
+                                        <div class="field-stack" style="margin-top:16px">
+                                            <div class="field-group">
+                                                <label class="field-label" for="vehicle-type">Vehicle type</label>
+                                                <select id="vehicle-type" class="field">
+                                                    <option value="Car" data-short="Car">Car</option>
+                                                    <option value="Van" data-short="Van">Van</option>
+                                                    <option value="Motorcycle" data-short="Motorcycle">Motorcycle</option>
+                                                    <option value="Pedal cycle" data-short="Pedal cycle">Pedal cycle</option>
+                                                    <option value="Bus/Coach" data-short="Bus / coach">Bus / coach</option>
+                                                    <option value="Taxi" data-short="Taxi">Taxi</option>
+                                                    <option value="HGV" data-short="HGV">HGV (over 7.5t)</option>
+                                                    <option value="Other" data-short="Other">Other</option>
+                                                </select>
+                                            </div>
+                                            <div class="field-group">
+                                                <span class="field-label" id="lbl-age">Driver age band</span>
+                                                <div class="seg-field" role="radiogroup" aria-labelledby="lbl-age" data-name="age_band">
+                                                    <input type="radio" name="age_band" id="age-young" value="Young (16-25)"><label for="age-young">Young</label>
+                                                    <input type="radio" name="age_band" id="age-adult" value="Adult (26-55)" checked><label for="age-adult">Adult</label>
+                                                    <input type="radio" name="age_band" id="age-older" value="Older (56+)"><label for="age-older">Older</label>
+                                                    <input type="radio" name="age_band" id="age-unk" value="Unknown"><label for="age-unk">Unknown</label>
+                                                </div>
+                                            </div>
+                                            <div class="field-group">
+                                                <label class="field-label" for="road-type">Road type</label>
+                                                <select id="road-type" class="field">
+                                                    <option value="Single carriageway" data-short="Single carriageway">Single carriageway</option>
+                                                    <option value="Dual carriageway" data-short="Dual carriageway">Dual carriageway</option>
+                                                    <option value="Roundabout" data-short="Roundabout">Roundabout</option>
+                                                    <option value="One-way / Slip road" data-short="One-way / slip">One-way / slip road</option>
+                                                    <option value="Unknown" data-short="Unknown">Unknown</option>
+                                                </select>
+                                            </div>
+                                            <div class="field-group">
+                                                <label class="field-label" for="junction">Junction</label>
+                                                <select id="junction" class="field">
+                                                    <option value="Not at junction" data-short="Not at junction">Not at junction (or within 20 m)</option>
+                                                    <option value="T or staggered junction" data-short="T or staggered">T or staggered junction</option>
+                                                    <option value="Crossroads" data-short="Crossroads">Crossroads</option>
+                                                    <option value="More than 4 arms" data-short="4+ arms">More than 4 arms</option>
+                                                    <option value="Private drive or entrance" data-short="Private drive">Private drive or entrance</option>
+                                                    <option value="Other junction" data-short="Other">Other junction</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </details>
+
+                                    <div class="form-actions">
+                                        <button type="submit" id="run-btn" class="btn btn-primary btn-block">
+                                            <i id="run-btn-icon" class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
+                                            <span id="run-btn-label">Score these conditions</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
-                        </div>
 
-                        <div id="prediction-result" role="status" aria-live="polite" class="hidden card card-pad">
-                            <div class="result-head">
-                                <h3 class="t-heading-sm">Result</h3>
-                                <div class="flex items-center gap-2">
-                                    <span id="badge-time" class="badge"></span>
-                                    <span id="badge-severity" class="badge"></span>
-                                </div>
-                            </div>
+                            <aside class="predict-out">
+                                <div id="prediction-result" class="card card-pad" role="status" aria-live="polite">
+                                    <div class="result-head">
+                                        <h3 class="t-heading-sm" style="margin:0">Assessment</h3>
+                                        <div class="flex items-center gap-2">
+                                            <span class="assess-status hidden" id="assess-status">Scoring…</span>
+                                            <span id="badge-time" class="badge badge-neutral">—</span>
+                                            <span id="badge-severity" class="badge badge-neutral">—</span>
+                                        </div>
+                                    </div>
 
-                            <div class="result-grid">
-                                <div class="result-cell">
-                                    <p class="result-label">Predicted severity</p>
-                                    <p id="res-severity" class="t-heading-md fg-ink">—</p>
-                                </div>
-                                <div class="result-cell">
-                                    <p class="result-label">Model confidence</p>
-                                    <p id="res-confidence" class="t-heading-md fg-brand">—</p>
-                                    <p class="result-sub">Probability of the predicted class</p>
-                                </div>
-                                <div class="result-cell">
-                                    <p class="result-label">Nearest risk hotspot</p>
-                                    <p id="res-cluster" class="t-heading-sm fg-ink">—</p>
-                                    <p id="res-cluster-sub" class="result-sub"></p>
-                                </div>
-                            </div>
+                                    <div class="assess-hero">
+                                        <div>
+                                            <p class="result-label">Most likely outcome</p>
+                                            <p id="res-severity" class="assess-verdict fg-ink">—</p>
+                                        </div>
+                                        <div class="assess-conf">
+                                            <p class="result-label">Confidence</p>
+                                            <p id="res-confidence" class="assess-conf-v">—</p>
+                                        </div>
+                                    </div>
 
-                            <div style="margin-top:24px">
-                                <p class="t-label-strong fg-ink" style="margin:0 0 12px">Probability by class</p>
-                                <div style="margin-bottom:14px">
-                                    <div class="prob-row"><span class="t-label fg-ink">Slight</span><span id="prob-slight" class="t-label fg-ink">—</span></div>
-                                    <div class="prob-track"><div id="bar-slight" class="prob-fill slight"></div></div>
-                                </div>
-                                <div style="margin-bottom:14px">
-                                    <div class="prob-row"><span class="t-label fg-ink">Serious</span><span id="prob-serious" class="t-label fg-ink">—</span></div>
-                                    <div class="prob-track"><div id="bar-serious" class="prob-fill serious"></div></div>
-                                </div>
-                                <div>
-                                    <div class="prob-row"><span class="t-label fg-ink">Fatal</span><span id="prob-fatal" class="t-label fg-ink">—</span></div>
-                                    <div class="prob-track"><div id="bar-fatal" class="prob-fill fatal"></div></div>
-                                </div>
-                            </div>
+                                    <div class="prob-block">
+                                        <p class="t-label-strong fg-ink" style="margin:0 0 12px">Probability by class</p>
+                                        <div style="margin-bottom:14px">
+                                            <div class="prob-row"><span class="t-label fg-ink">Slight</span><span id="prob-slight" class="t-label fg-ink num">—</span></div>
+                                            <div class="prob-track"><div id="bar-slight" class="prob-fill slight"></div></div>
+                                        </div>
+                                        <div style="margin-bottom:14px">
+                                            <div class="prob-row"><span class="t-label fg-ink">Serious</span><span id="prob-serious" class="t-label fg-ink num">—</span></div>
+                                            <div class="prob-track"><div id="bar-serious" class="prob-fill serious"></div></div>
+                                        </div>
+                                        <div>
+                                            <div class="prob-row"><span class="t-label fg-ink">Fatal</span><span id="prob-fatal" class="t-label fg-ink num">—</span></div>
+                                            <div class="prob-track"><div id="bar-fatal" class="prob-fill fatal"></div></div>
+                                        </div>
+                                        <p class="result-sub" id="res-algo"></p>
+                                    </div>
 
-                            <div style="margin-top:24px">
-                                <button type="button" onclick="viewPredictionOnMap()" class="btn btn-ghost btn-block">
-                                    <i class="fa-solid fa-map-location-dot"></i>
-                                    <span>View this area on the hotspot map</span>
-                                </button>
-                            </div>
+                                    <div class="context-block">
+                                        <div class="section-head" style="margin-bottom:4px">
+                                            <p class="t-label-strong fg-ink" style="margin:0">What the records show</p>
+                                            <span class="t-caption fg-muted" id="context-base"></span>
+                                        </div>
+                                        <p class="t-caption fg-muted" style="margin:0 0 13px">Each bar is that condition's serious-or-fatal share on its own, across every 2023 record.</p>
+                                        <div class="context-list" id="context-list">
+                                            <p class="t-caption fg-muted" style="margin:0">Waiting for the first score…</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="hotspot-block">
+                                        <p class="t-label-strong fg-ink" style="margin:0">Nearest high-risk area</p>
+                                        <p id="res-cluster" class="t-body-strong fg-ink" style="margin:8px 0 0">—</p>
+                                        <p id="res-cluster-sub" class="result-sub" style="margin-top:4px"></p>
+                                        <button type="button" onclick="viewPredictionOnMap()" class="btn btn-ghost btn-block" style="margin-top:12px">
+                                            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+                                            <span>Show on the hotspot map</span>
+                                        </button>
+                                    </div>
+
+                                    <div class="assess-actions">
+                                        <button type="button" id="pin-btn" class="btn btn-ghost">
+                                            <i class="fa-solid fa-thumbtack" aria-hidden="true"></i><span id="pin-label">Pin to compare</span>
+                                        </button>
+                                        <button type="button" id="share-btn" class="btn btn-ghost">
+                                            <i class="fa-solid fa-link" aria-hidden="true"></i><span id="share-label">Copy link</span>
+                                        </button>
+                                    </div>
+
+                                    <div id="compare-block" class="compare hidden"></div>
+                                </div>
+                            </aside>
                         </div>
                     </div>
 

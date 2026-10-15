@@ -1,4 +1,4 @@
-"""Flask backend for RoadSafe AI (pipeline v3: full STATS19 features, leak-free)."""
+"""Flask backend for RoadSafe Analytics (pipeline v3: full STATS19 features, leak-free)."""
 import os
 import json
 import joblib
@@ -155,6 +155,101 @@ def _cat(col, value):
     return DEFAULTS.get(col, 'Unknown')
 
 
+_CONDITION_RISK = None
+
+
+def condition_risk_table():
+    """Observed serious-or-fatal rate per condition value, from the console data.
+
+    Written by build_dashboard_data.build_condition_risk() and keyed by the same
+    values build_model_frame() puts in the model row.
+    """
+    global _CONDITION_RISK
+    if _CONDITION_RISK is None:
+        try:
+            with open('static/dashboard_data.json') as f:
+                _CONDITION_RISK = json.load(f).get('condition_risk') or {}
+        except Exception:
+            _CONDITION_RISK = {}
+    return _CONDITION_RISK
+
+
+# Fields the predictor can send, in the order the panel shows them:
+# (condition_risk key, field label, model-row column)
+CONDITION_ROWS = [
+    ('weather', 'Weather', 'Weather'),
+    ('surface', 'Road surface', 'Road_Surface'),
+    ('light', 'Light', 'Light'),
+    ('road_type', 'Road type', 'Road_Type'),
+    ('junction', 'Junction', 'Junction_Detail'),
+    ('vehicle', 'Vehicle', 'Veh_Type'),
+    ('age_band', 'Driver age', 'Driver_AgeBand'),
+    ('speed', 'Speed limit', 'Speed_limit'),
+]
+
+# Only rows whose model value is a bare code need a readable label; the rest
+# (weather, surface, speed, vehicle groups) already read well.
+CONDITION_DISPLAY = {
+    'light': {'1': 'Daylight', '4': 'Dark \u2014 street lights lit',
+              '5': 'Dark \u2014 unlit', '6': 'Dark \u2014 unlit', '7': 'Unknown'},
+    'road_type': {'1': 'Roundabout', '2': 'One-way / slip road',
+                  '3': 'Dual carriageway', '6': 'Single carriageway',
+                  '7': 'Slip road', '9': 'Unknown'},
+    'junction': {'0': 'Not at junction', '13': 'T or staggered junction',
+                 '16': 'Crossroads', '17': 'Private drive or entrance',
+                 '18': 'More than 4 arms', '19': 'Other junction'},
+    'age_band': {'5': 'Young (16\u201325)', '6': 'Adult (26\u201355)',
+                 '9': 'Older (56+)', '-1': 'Unknown'},
+}
+
+
+def _speed_key(v):
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return ''
+
+
+def _vehicle_group(code):
+    """Veh_Type code -> the group label the console and the data table use."""
+    for name, c in VEH_NORM.items():
+        if c == str(code):
+            return name
+    return ''
+
+
+def condition_context(row):
+    """How often each of this payload's conditions was serious or fatal.
+
+    Returns (rows, baseline_pct). Univariate context only - it says how these
+    conditions behave across every record, not why this prediction came out so.
+    """
+    table = condition_risk_table()
+    baseline = table.get('baseline_high_sev_pct')
+    rows = []
+    for key, label, column in CONDITION_ROWS:
+        raw = row.get(column)
+        if raw in (None, ''):
+            continue
+        if key == 'vehicle':
+            value = _vehicle_group(raw)
+        elif key == 'speed':
+            value = _speed_key(raw)
+        else:
+            value = str(raw).strip()
+        stats = (table.get(key) or {}).get(value) if value else None
+        if not stats:
+            continue
+        rows.append({
+            'field': key,
+            'label': label,
+            'display': CONDITION_DISPLAY.get(key, {}).get(value) or value,
+            'n': stats['n'],
+            'hs_pct': stats['hs_pct'],
+        })
+    return rows, baseline
+
+
 def build_model_frame(payload):
     try:
         lat = float(payload.get('latitude', 51.5074))
@@ -216,7 +311,8 @@ def build_model_frame(payload):
         raise RuntimeError('preprocessor.pkl missing. Run train_model.py first.')
     return (preprocessor.transform(pd.DataFrame([row])),
             {'dist': dist, 'size': size, 'is_noise': noise, 'cluster_id': cluster_id,
-             'hour': hour, 'is_night': is_night})
+             'hour': hour, 'is_night': is_night},
+            row)
 
 
 if any(models_dict.values()) and severity_encoder is not None:
@@ -267,7 +363,7 @@ def predict():
                     break
         if active_model is None or severity_encoder is None:
             raise RuntimeError('Model files missing. Run train_model.py first.')
-        X, spat = build_model_frame(data)
+        X, spat, row = build_model_frame(data)
         pred_encoded = active_model.predict(X)[0]
         pred_probs = (active_model.predict_proba(X)[0]
                       if hasattr(active_model, 'predict_proba') else [0.33, 0.33, 0.34])
@@ -291,10 +387,13 @@ def predict():
         else:
             hotspot_label = 'Open road (no mapped hotspot)'
             hotspot_rank = hotspot_count = hotspot_high = None
+        context, context_baseline = condition_context(row)
         return jsonify({
             'status': 'success',
             'predicted_severity': severity_label,
             'probabilities': prob_dict,
+            'context': context,
+            'context_baseline_pct': context_baseline,
             'cluster_id': cid,
             'hotspot': hotspot_label,
             'hotspot_rank': hotspot_rank,

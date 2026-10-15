@@ -110,6 +110,83 @@ def _profile(frame):
     }
 
 
+def _as_key(v):
+    """Stable string key for a raw STATS19 value (int columns often read as floats)."""
+    try:
+        if pd.isna(v):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, (int, np.integer)):
+        return str(int(v))
+    if isinstance(v, (float, np.floating)):
+        return str(int(v)) if float(v).is_integer() else str(float(v))
+    s = str(v).strip()
+    return '' if s.lower() in ('nan', 'none') else s
+
+
+def _veh_group(v):
+    """Veh_Type code -> group label. Mirrors veh_group() inside build()."""
+    v = str(v)
+    if v == '9':
+        return 'Car'
+    if v == '19':
+        return 'Van'
+    if v in ('2', '3', '4', '5', '23', '33', '97'):
+        return 'Motorcycle'
+    if v == '1':
+        return 'Pedal cycle'
+    if v in ('10', '11'):
+        return 'Bus/Coach'
+    if v == '8':
+        return 'Taxi'
+    if v in ('20', '21'):
+        return 'HGV'
+    return 'Other'
+
+
+# What the predictor can send, and the model-row column carrying it. Keys match
+# the values app.py writes into the row so the API needs no second mapping.
+CONDITION_FIELDS = [
+    ('weather', 'Weather'),
+    ('surface', 'Road_Surface'),
+    ('light', 'Light'),
+    ('road_type', 'Road_Type'),
+    ('junction', 'Junction_Detail'),
+    ('vehicle', 'Veh_Type'),
+    ('age_band', 'age_band_of_driver'),
+    ('speed', 'Speed_limit'),
+]
+MIN_CONDITION_N = 30
+
+
+def build_condition_risk(df):
+    """Observed serious-or-fatal share for each value the predictor can send.
+
+    Univariate context for the predictor's "what the records show" panel: how
+    often collisions carrying that one condition were serious or fatal across
+    every record. It is not an attribution for a single prediction.
+    """
+    high = df['Severity'].isin(HIGH_SEV)
+    out = {}
+    for key, col in CONDITION_FIELDS:
+        if col not in df.columns:
+            continue
+        series = df[col].apply(_veh_group) if key == 'vehicle' else df[col].apply(_as_key)
+        work = pd.DataFrame({'k': series, 'hs': high})
+        work = work[work['k'] != '']
+        table = {}
+        for value, group in work.groupby('k', sort=False):
+            n = int(len(group))
+            if n < MIN_CONDITION_N:
+                continue
+            table[str(value)] = {'n': n, 'hs_pct': round(float(group['hs'].mean() * 100), 1)}
+        out[key] = {k: table[k] for k in sorted(table, key=lambda x: -table[x]['hs_pct'])}
+    out['baseline_high_sev_pct'] = round(float(high.mean() * 100), 1)
+    out['rows'] = int(len(df))
+    return out
+
+
 def _projector(lat0):
     def proj(latlon):
         ll = np.asarray(latlon, dtype=float)
@@ -155,7 +232,7 @@ def build():
                        for s in ['Slight', 'Serious', 'Fatal']}
 
     # Vehicle-group x severity shares (codes -> readable groups)
-    def veh_group(v):
+    def veh_group(v):   # keep in step with _veh_group() above
         v = str(v)
         if v == '9':
             return 'Car'
@@ -291,6 +368,7 @@ def build():
                    'serious': int(sev_counts.get('Serious', 0)),
                    'slight': int(sev_counts.get('Slight', 0)),
                    'hotspots': len(hotspots)},
+        'condition_risk': build_condition_risk(df),
     }
     with open('static/dashboard_data.json', 'w') as f:
         json.dump(data, f)
