@@ -1,0 +1,154 @@
+{
+    "raw_num": [
+        "Latitude",
+        "Longitude",
+        "Speed_limit",
+        "Is_Night",
+        "Hour_sin",
+        "Hour_cos"
+    ],
+    "raw_cat": [
+        "Weather",
+        "Road_Surface",
+        "Day_of_Week",
+        "Month",
+        "Light",
+        "Road_Type",
+        "Road_Class1",
+        "Road_Class2",
+        "Junction_Detail",
+        "Junction_Control",
+        "Ped_Crossing",
+        "Site_Cond",
+        "Carriage_Haz",
+        "Urban_Rural",
+        "Trunk",
+        "Veh_Type",
+        "Veh_Manoeuvre",
+        "Junction_Loc",
+        "Dir_From",
+        "Dir_To",
+        "Driver_Sex",
+        "Driver_AgeBand",
+        "Veh_AgeBand",
+        "Journey",
+        "Propulsion"
+    ],
+    "transformed_count": 221,
+    "defaults": {
+        "Weather": "Fine no high winds",
+        "Road_Surface": "Dry",
+        "Day_of_Week": "6",
+        "Month": "6",
+        "Light": "1",
+        "Road_Type": "6",
+        "Road_Class1": "3",
+        "Road_Class2": "6",
+        "Junction_Detail": "0",
+        "Junction_Control": "4",
+        "Ped_Crossing": "0",
+        "Site_Cond": "0",
+        "Carriage_Haz": "0",
+        "Urban_Rural": "1",
+        "Trunk": "2",
+        "Veh_Type": "9",
+        "Veh_Manoeuvre": "19",
+        "Junction_Loc": "0",
+        "Dir_From": "1",
+        "Dir_To": "5",
+        "Driver_Sex": "1",
+        "Driver_AgeBand": "6",
+        "Veh_AgeBand": "Old",
+        "Journey": "6",
+        "Propulsion": "1"
+    },
+    "n_clusters": 503,
+    "spatial": {
+        "eps_km": 1.5,
+        "min_samples": 10,
+        "lat0": 52.3701
+    },
+    "total_rows": 104246,
+    "class_balance": {
+        "Slight": 0.7606,
+        "Serious": 0.2248,
+        "Fatal": 0.0146
+    },
+    "best_cv_table": [
+        {
+            "cfg": {
+                "max_depth": 4,
+                "learning_rate": 0.05,
+                "n_estimators": 300,
+                "min_child_weight": 5,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8
+            },
+            "macro_f1": 37.37
+        },
+        {
+            "cfg": {
+                "max_depth": 6,
+                "learning_rate": 0.05,
+                "n_estimators": 300,
+                "min_child_weight": 5,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8
+            },
+            "macro_f1": 39.4
+        },
+        {
+            "cfg": {
+                "max_depth": 4,
+                "learning_rate": 0.1,
+                "n_estimators": 200,
+                "min_child_weight": 1,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8
+            },
+            "macro_f1": 37.72
+        },
+        {
+            "cfg": {
+                "max_depth": 6,
+                "learning_rate": 0.1,
+                "n_estimators": 200,
+                "min_child_weight": 1,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8
+            },
+            "macro_f1": 39.75
+        },
+        {
+            "cfg": {
+                "max_depth": 6,
+                "learning_rate": 0.05,
+                "n_estimators": 500,
+                "min_child_weight": 3,
+                "subsample": 0.9,
+                "colsample_bytree": 0.9
+            },
+            "macro_f1": 40.28
+        },
+        {
+            "cfg": {
+                "max_depth": 3,
+                "learning_rate": 0.1,
+                "n_estimators": 300,
+                "min_child_weight": 10,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8
+            },
+            "macro_f1": 37.26
+        }
+    ],
+    "best_xgb_cfg": {
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "n_estimators": 500,
+        "min_child_weight": 3,
+        "subsample": 0.9,
+        "colsample_bytree": 0.9
+    },
+    "selection": "fatal-first (within 1.0 macro-F1 of best)"
+}

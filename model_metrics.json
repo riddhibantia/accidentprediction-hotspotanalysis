@@ -1,20 +1,50 @@
 {
     "Logistic Regression": {
-        "Accuracy": 85.28,
-        "Precision": 72.72,
-        "Recall": 85.28,
-        "F1-Score": 78.5
+        "Accuracy": 50.36,
+        "Train_Acc": 50.71,
+        "Balanced_Accuracy": 51.31,
+        "MCC": 0.138,
+        "Macro_AUC": 67.79,
+        "Brier": 0.5818,
+        "Precision": 71.03,
+        "Recall": 50.36,
+        "F1-Score": 57.71,
+        "Macro_F1": 35.32,
+        "Macro_Precision": 39.3,
+        "Macro_Recall": 51.31,
+        "Fatal_Recall": 63.49,
+        "LogLoss": 0.95
     },
     "Random Forest": {
-        "Accuracy": 80.78,
-        "Precision": 75.48,
-        "Recall": 80.78,
-        "F1-Score": 77.78
+        "Accuracy": 60.17,
+        "Train_Acc": 70.36,
+        "Balanced_Accuracy": 47.62,
+        "MCC": 0.16,
+        "Macro_AUC": 67.48,
+        "Brier": 0.5118,
+        "Precision": 70.12,
+        "Recall": 60.17,
+        "F1-Score": 64.14,
+        "Macro_F1": 39.5,
+        "Macro_Precision": 39.83,
+        "Macro_Recall": 47.62,
+        "Fatal_Recall": 35.53,
+        "LogLoss": 0.834
     },
     "XGBoost Classifier": {
-        "Accuracy": 85.28,
-        "Precision": 72.72,
-        "Recall": 85.28,
-        "F1-Score": 78.5
+        "Accuracy": 58.07,
+        "Train_Acc": 65.82,
+        "Balanced_Accuracy": 48.94,
+        "MCC": 0.169,
+        "Macro_AUC": 69.37,
+        "Brier": 0.505,
+        "Precision": 70.97,
+        "Recall": 58.07,
+        "F1-Score": 62.8,
+        "Macro_F1": 39.23,
+        "Macro_Precision": 40.16,
+        "Macro_Recall": 48.94,
+        "Fatal_Recall": 39.14,
+        "LogLoss": 0.814
     }
 }

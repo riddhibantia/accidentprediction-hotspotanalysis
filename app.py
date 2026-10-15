@@ -1,96 +1,316 @@
-from flask import Flask, render_template, request, jsonify
-import joblib
-import pandas as pd
+"""Flask backend for RoadSafe AI (pipeline v3: full STATS19 features, leak-free)."""
 import os
 import json
+import joblib
+import numpy as np
+import pandas as pd
+from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# Load all three trained models and severity encoder
+
+def _load(name):
+    return joblib.load(name) if os.path.exists(name) else None
+
+
 models_dict = {
-    'xgboost': joblib.load('model.pkl') if os.path.exists('model.pkl') else None,
-    'random_forest': joblib.load('model_rf.pkl') if os.path.exists('model_rf.pkl') else None,
-    'logistic_regression': joblib.load('model_lr.pkl') if os.path.exists('model_lr.pkl') else None,
+    'xgboost': _load('model.pkl'),
+    'random_forest': _load('model_rf.pkl'),
+    'logistic_regression': _load('model_lr.pkl'),
 }
-encoder_path = 'severity_encoder.pkl'
-severity_encoder = joblib.load(encoder_path) if os.path.exists(encoder_path) else None
+severity_encoder = _load('severity_encoder.pkl')
+preprocessor = _load('preprocessor.pkl')
+spatial = _load('spatial.pkl')
+features_meta = {}
+if os.path.exists('model_features.json'):
+    try:
+        with open('model_features.json') as f:
+            features_meta = json.load(f)
+    except Exception:
+        features_meta = {}
+DEFAULTS = features_meta.get('defaults', {})
+
+DISPLAY_TO_KEY = {
+    'Logistic Regression': 'logistic_regression',
+    'Random Forest': 'random_forest',
+    'XGBoost Classifier': 'xgboost',
+}
+KEY_TO_DISPLAY = {v: k for k, v in DISPLAY_TO_KEY.items()}
+
+# Fatal-first selection: a model must be within this many macro-F1 points of the
+# best to be considered, so a weak model can't win on fatal recall alone.
+FATAL_FIRST_MACRO_GUARD = 1.0
+
+WX_NORM = {'Clear': 'Fine no high winds', 'Rain': 'Raining no high winds',
+           'Fog': 'Fog or mist', 'Snow': 'Snowing', 'Storm': 'Raining no high winds',
+           'Fine no high winds': 'Fine no high winds',
+           'Raining no high winds': 'Raining no high winds',
+           'Fog or mist': 'Fog or mist', 'Snowing': 'Snowing'}
+# UI surface value -> training label (values are already canonical)
+RS_NORM = {'Dry': 'Dry', 'Wet or damp': 'Wet or damp',
+           'Frost or ice': 'Frost or ice', 'Snow': 'Snow'}
+# UI groups -> representative training codes (most common code in group)
+VEH_NORM = {'Car': '9', 'Van': '19', 'Motorcycle': '3', 'Pedal cycle': '1',
+            'Bus/Coach': '11', 'Taxi': '8', 'HGV': '21', 'Other': '90'}
+AGE_NORM = {'Young (16-25)': '5', 'Adult (26-55)': '6', 'Older (56+)': '9',
+            'Unknown': '-1'}
+LIGHT_NORM = {'Daylight': '1', 'Dark (lit)': '4', 'Dark (unlit)': '6',
+              'Unknown': '7'}
+ROAD_NORM = {'Single carriageway': '6', 'Dual carriageway': '3', 'Roundabout': '1',
+             'One-way / Slip road': '2', 'Unknown': '9'}
+JUNC_NORM = {
+    'Not at junction': '0',              # not at, or within 20 m of, a junction
+    'T or staggered junction': '13',
+    'Crossroads': '16',
+    'More than 4 arms': '18',
+    'Private drive or entrance': '17',
+    'Other junction': '19',
+}
+
+
+def get_best_model():
+    """Fatal-first selection.
+
+    Keep every model within FATAL_FIRST_MACRO_GUARD of the best macro-F1, then
+    serve the one with the highest Fatal recall (tie-break: macro-F1, then
+    weighted F1). On the current metrics that is XGBoost.
+    """
+    fallback = ('xgboost', 'XGBoost Classifier', {})
+    if not os.path.exists('model_metrics.json'):
+        return fallback
+    try:
+        with open('model_metrics.json') as f:
+            data = json.load(f)
+    except Exception:
+        return fallback
+    rows = []
+    for display, scores in data.items():
+        if not isinstance(scores, dict):
+            continue
+        key = DISPLAY_TO_KEY.get(display)
+        if key is None or models_dict.get(key) is None:
+            continue
+        try:
+            macro = float(scores.get('Macro_F1', -1))
+            fatal = float(scores.get('Fatal_Recall', -1))
+            w = float(scores.get('F1-Score', scores.get('F1_Score', -1)))
+        except (TypeError, ValueError):
+            continue
+        rows.append((key, display, scores, macro, fatal, w))
+    if not rows:
+        for k in ('xgboost', 'random_forest', 'logistic_regression'):
+            if models_dict.get(k) is not None:
+                return k, KEY_TO_DISPLAY.get(k, k), {}
+        return fallback
+    best_macro = max(r[3] for r in rows)
+    eligible = [r for r in rows if r[3] >= best_macro - FATAL_FIRST_MACRO_GUARD]
+    best = max(eligible, key=lambda r: (r[4], r[3], r[5]))
+    return best[0], best[1], best[2]
+
+
+def _project_km(latlon, lat0):
+    """Same equirectangular projection used in training (degrees -> km)."""
+    ll = np.asarray(latlon, dtype=float)
+    lat, lon = ll[..., 0], ll[..., 1]
+    return np.stack([lon * 111.320 * np.cos(np.radians(lat0)), lat * 110.574], axis=-1)
+
+
+def spatial_row(lat, lon):
+    if spatial is None or len(spatial.get('centroids', [])) == 0:
+        return 0.0, 0.0, 1, -1
+    c = np.asarray(spatial['centroids'], dtype=float)
+    eps = float(spatial.get('eps', 1.5))
+    lat0 = float(spatial.get('lat0', 54.0))
+    d = np.sqrt(((_project_km(np.array([lat, lon]), lat0) - _project_km(c, lat0)) ** 2).sum(axis=1))
+    j = int(d.argmin())
+    best = float(d[j])
+    if best <= eps:
+        return best, float(spatial['sizes'][j]), 0, j
+    return best, 0.0, 1, -1
+
+
+_HOTSPOT_LOOKUP = None
+
+
+def hotspot_lookup():
+    """cluster_id -> hotspot record from static/dashboard_data.json (cached)."""
+    global _HOTSPOT_LOOKUP
+    if _HOTSPOT_LOOKUP is None:
+        _HOTSPOT_LOOKUP = {}
+        try:
+            with open('static/dashboard_data.json') as f:
+                data = json.load(f)
+            for h in data.get('hotspots', []):
+                if h.get('cluster_id') is not None:
+                    _HOTSPOT_LOOKUP[int(h['cluster_id'])] = h
+        except Exception:
+            _HOTSPOT_LOOKUP = {}
+    return _HOTSPOT_LOOKUP
+
+
+def _cat(col, value):
+    v = str(value).strip() if value is not None else ''
+    if v and v.lower() != 'none':
+        return v
+    return DEFAULTS.get(col, 'Unknown')
+
+
+def build_model_frame(payload):
+    try:
+        lat = float(payload.get('latitude', 51.5074))
+        lon = float(payload.get('longitude', -0.1278))
+        speed = float(payload.get('speed_limit', 30))
+    except (TypeError, ValueError):
+        raise ValueError('latitude, longitude and speed_limit must be numbers')
+    if not -90 <= lat <= 90:
+        raise ValueError('latitude must be -90..90, got %r' % (payload.get('latitude'),))
+    if not -180 <= lon <= 180:
+        raise ValueError('longitude must be -180..180, got %r' % (payload.get('longitude'),))
+    if not 5 <= speed <= 90:
+        raise ValueError('speed_limit must be 5..90 mph, got %r' % (payload.get('speed_limit'),))
+    if payload.get('hour') not in (None, ''):
+        try:
+            hour = int(float(payload.get('hour')))
+        except (TypeError, ValueError):
+            raise ValueError('hour must be a number 0-23, got %r' % (payload.get('hour'),))
+        if not 0 <= hour <= 23:
+            raise ValueError('hour must be 0-23, got %s' % (payload.get('hour'),))
+    else:  # backward compat with Day/Night select
+        raw_dn = payload.get('day_night', payload.get('time_of_day', 'Day'))
+        hour = 22 if str(raw_dn).strip().lower().startswith('night') else 12
+    is_night = 1 if (hour < 6 or hour >= 18) else 0
+    dist, size, noise, cluster_id = spatial_row(lat, lon)
+    row = {
+        'Latitude': lat, 'Longitude': lon, 'Speed_limit': speed,
+        'Is_Night': is_night,
+        'Hour_sin': float(np.sin(2 * np.pi * hour / 24)),
+        'Hour_cos': float(np.cos(2 * np.pi * hour / 24)),
+        'hotspot_dist': dist, 'hotspot_size': size, 'is_noise': noise,
+        'Weather': WX_NORM.get(str(payload.get('weather', 'Clear')).strip(), 'Fine no high winds'),
+        'Road_Surface': RS_NORM.get(str(payload.get('road_surface', 'Dry Asphalt')).strip(), 'Dry'),
+        'Day_of_Week': _cat('Day_of_Week', payload.get('day_of_week')),
+        'Month': _cat('Month', payload.get('month')),
+        'Light': LIGHT_NORM.get(str(payload.get('light', '')).strip(), _cat('Light', None)),
+        'Road_Type': ROAD_NORM.get(str(payload.get('road_type', '')).strip(), _cat('Road_Type', None)),
+        'Road_Class1': _cat('Road_Class1', payload.get('road_class')),
+        'Road_Class2': _cat('Road_Class2', None),
+        'Junction_Detail': JUNC_NORM.get(str(payload.get('junction', '')).strip(), _cat('Junction_Detail', None)),
+        'Junction_Control': _cat('Junction_Control', None),
+        'Ped_Crossing': _cat('Ped_Crossing', None),
+        'Site_Cond': _cat('Site_Cond', None),
+        'Carriage_Haz': _cat('Carriage_Haz', None),
+        'Urban_Rural': _cat('Urban_Rural', None),
+        'Trunk': _cat('Trunk', None),
+        'Veh_Type': VEH_NORM.get(str(payload.get('vehicle_type', '')).strip(), _cat('Veh_Type', None)),
+        'Veh_Manoeuvre': _cat('Veh_Manoeuvre', None),
+        'Junction_Loc': _cat('Junction_Loc', None),
+        'Dir_From': _cat('Dir_From', None),
+        'Dir_To': _cat('Dir_To', None),
+        'Driver_Sex': _cat('Driver_Sex', payload.get('driver_sex')),
+        'Driver_AgeBand': AGE_NORM.get(str(payload.get('age_band', '')).strip(), _cat('Driver_AgeBand', None)),
+        'Veh_AgeBand': _cat('Veh_AgeBand', None),
+        'Journey': _cat('Journey', None),
+        'Propulsion': _cat('Propulsion', None),
+    }
+    if preprocessor is None:
+        raise RuntimeError('preprocessor.pkl missing. Run train_model.py first.')
+    return (preprocessor.transform(pd.DataFrame([row])),
+            {'dist': dist, 'size': size, 'is_noise': noise, 'cluster_id': cluster_id,
+             'hour': hour, 'is_night': is_night})
+
 
 if any(models_dict.values()) and severity_encoder is not None:
-    print("-> All trained models and encoder loaded successfully!")
+    print("-> Models + encoder loaded. Best:", get_best_model()[1])
 else:
-    print("-> Warning: Some model files not found. Please run train_model.py first.")
+    print("-> Warning: model files missing. Run train_model.py first.")
+
 
 @app.route('/')
 def home():
     return render_template('index.html')
 
+
 @app.route('/metrics', methods=['GET'])
 def get_metrics():
-    metrics_path = 'model_metrics.json'
-    if os.path.exists(metrics_path):
-        with open(metrics_path, 'r') as f:
-            data = json.load(f)
-        return jsonify({'status': 'success', 'metrics': data})
-    else:
-        return jsonify({'status': 'error', 'message': 'Metrics file not found. Run train_model.py first.'}), 404
+    if not os.path.exists('model_metrics.json'):
+        return jsonify({'status': 'error',
+                        'message': 'Metrics file not found. Run train_model.py first.'}), 404
+    with open('model_metrics.json') as f:
+        data = json.load(f)
+    best_key, best_display, best_scores = get_best_model()
+    return jsonify({'status': 'success', 'metrics': data,
+                    'best_model': {'key': best_key, 'display': best_display,
+                                   'scores': best_scores},
+                    'stats': {'total_rows': features_meta.get('total_rows'),
+                              'n_clusters': features_meta.get('n_clusters'),
+                              'selection': 'fatal-first (within 1.0 macro-F1 of best)'}})
+
+
+@app.route('/best_model', methods=['GET'])
+def best_model_info():
+    best_key, best_display, best_scores = get_best_model()
+    return jsonify({'status': 'success', 'key': best_key,
+                    'display': best_display, 'scores': best_scores})
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        data = request.get_json()
-        
-        # Extract inputs from frontend form
-        lat = float(data.get('latitude', 37.7749))
-        lon = float(data.get('longitude', -122.4194))
-        speed_limit = float(data.get('speed_limit', 45))
-        
-        # Get selected algorithm from frontend (default to xgboost)
-        algo_choice = data.get('algorithm', 'xgboost')
-        active_model = models_dict.get(algo_choice, models_dict['xgboost'])
-        
-        # Simple encoding mapping for weather and surface matching training categories
-        weather_map = {'Clear': 0, 'Rain': 1, 'Fog': 2, 'Snow': 3, 'Storm': 4}
-        surface_map = {'Dry Asphalt': 0, 'Wet Asphalt': 1, 'Potholes': 2, 'Unpaved': 3}
-        
-        weather_val = weather_map.get(data.get('weather', 'Clear'), 0)
-        surface_val = surface_map.get(data.get('road_surface', 'Dry Asphalt'), 0)
-        
-        # Spatial Cluster ID heuristic based on coordinates/speed
-        cluster_id = 101 if speed_limit > 50 else 103
-        
-        # Create input DataFrame matching training features
-        input_df = pd.DataFrame([[lat, lon, speed_limit, cluster_id, weather_val, surface_val]],
-                                columns=['Latitude', 'Longitude', 'Speed_limit', 'Cluster_ID', 'Weather', 'Road_Surface'])
-        
-        if active_model is not None and severity_encoder is not None:
-            pred_encoded = active_model.predict(input_df)[0]
-            
-            # Check if model supports probability estimation
-            if hasattr(active_model, 'predict_proba'):
-                pred_probs = active_model.predict_proba(input_df)[0]
-            else:
-                pred_probs = [0.33, 0.33, 0.34]
-                
-            severity_label = severity_encoder.inverse_transform([pred_encoded])[0]
-            classes = severity_encoder.classes_
-            prob_dict = {str(cls): float(prob * 100) for cls, prob in zip(classes, pred_probs)}
+        data = request.get_json(force=True)
+        best_key, best_display, _ = get_best_model()
+        active_model = models_dict.get(best_key)
+        if active_model is None:
+            for k in ('xgboost', 'random_forest', 'logistic_regression'):
+                if models_dict.get(k) is not None:
+                    active_model = models_dict[k]
+                    best_key, best_display = k, KEY_TO_DISPLAY.get(k, k)
+                    break
+        if active_model is None or severity_encoder is None:
+            raise RuntimeError('Model files missing. Run train_model.py first.')
+        X, spat = build_model_frame(data)
+        pred_encoded = active_model.predict(X)[0]
+        pred_probs = (active_model.predict_proba(X)[0]
+                      if hasattr(active_model, 'predict_proba') else [0.33, 0.33, 0.34])
+        severity_label = severity_encoder.inverse_transform([pred_encoded])[0]
+        classes = severity_encoder.classes_
+        prob_dict = {str(cls): float(prob * 100)
+                     for cls, prob in zip(classes, pred_probs)}
+        lookup = hotspot_lookup()
+        cid = int(spat['cluster_id'])
+        info = lookup.get(cid) if cid >= 0 else None
+        if info is not None:
+            hotspot_label = info.get('name', f'Cluster #{cid}')
+            hotspot_rank = info.get('rank')
+            hotspot_count = int(info.get('count', spat['size']))
+            hotspot_high = info.get('high_sev_pct')
+        elif cid >= 0:
+            hotspot_label = f'Cluster #{cid}'
+            hotspot_rank = None
+            hotspot_count = int(spat['size'])
+            hotspot_high = None
         else:
-            severity_label = "Serious"
-            prob_dict = {"Slight": 40.0, "Serious": 50.0, "Fatal": 10.0}
-
+            hotspot_label = 'Open road (no mapped hotspot)'
+            hotspot_rank = hotspot_count = hotspot_high = None
         return jsonify({
             'status': 'success',
             'predicted_severity': severity_label,
             'probabilities': prob_dict,
-            'cluster_id': cluster_id,
-            'algorithm_used': algo_choice.upper().replace('_', ' ')
+            'cluster_id': cid,
+            'hotspot': hotspot_label,
+            'hotspot_rank': hotspot_rank,
+            'hotspot_count': hotspot_count,
+            'hotspot_high_sev_pct': hotspot_high,
+            'n_hotspots': len(lookup),
+            'hotspot_dist': round(spat['dist'], 5),
+            'algorithm_used': best_display,
+            'best_model_key': best_key,
+            'selection_reason': 'fatal-first selection (within 1.0 macro-F1 of best)',
+            'time_of_day': 'Night' if spat['is_night'] == 1 else 'Day',
+            'hour': spat['hour'],
         })
-        
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 400
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
