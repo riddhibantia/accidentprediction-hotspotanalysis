@@ -48,6 +48,13 @@ function switchTab(tabId) {
             if (MAP_NEEDS_FIT) fitHotspotOverview();
         }, 200);
     }
+    if (tabId === 'analytics') {
+        // The story chart was built while its tab was hidden; re-measure on open.
+        setTimeout(() => {
+            const box = document.querySelector('#insights-story .story__slide.is-active .chart-box');
+            if (box) resizeChartIn(box);
+        }, 60);
+    }
     if (window.innerWidth < 1024) closeSidebar();
 }
 
@@ -142,11 +149,9 @@ function initCharts() {
                 plugins: { legend: { display: false } },
                 onClick: (evt, els, chart) => {
                     if (!els.length) return;
-                    // A bar only acts in the enlarged view; on the grid a click enlarges the card.
-                    if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Fine no high winds': 'Clear', 'Raining no high winds': 'Rain', 'Fog or mist': 'Fog', 'Snowing': 'Snow' };
-                    if (mapBack[label]) { setSeg('weather', mapBack[label]); conditionsChanged('Weather set from the chart — score to see the assessment.'); closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('weather', mapBack[label]); conditionsChanged('Weather set from the chart — score to see the assessment.'); switchTab('predict'); }
                 }
             }
         });
@@ -194,11 +199,9 @@ function initCharts() {
                 plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } },
                 onClick: (evt, els, chart) => {
                     if (!els.length) return;
-                    // A bar only acts in the enlarged view; on the grid a click enlarges the card.
-                    if (!chart.canvas || !chart.canvas.closest('#chart-modal')) return;
                     const label = chart.data.labels[els[0].index];
                     const mapBack = { 'Dry': 'Dry', 'Wet or damp': 'Wet or damp', 'Frost or ice': 'Frost or ice', 'Snow': 'Snow' };
-                    if (mapBack[label]) { setSeg('surface', mapBack[label]); conditionsChanged('Surface set from the chart — score to see the assessment.'); closeChartModal(); switchTab('predict'); }
+                    if (mapBack[label]) { setSeg('surface', mapBack[label]); conditionsChanged('Surface set from the chart — score to see the assessment.'); switchTab('predict'); }
                 }
             }
         });
@@ -1127,39 +1130,6 @@ function clearPin() {
     renderCompare();
 }
 
-async function copyLink() {
-    const payload = readFormPayload();
-    const params = new URLSearchParams();
-    params.set('lat', payload.latitude);
-    params.set('lng', payload.longitude);
-    params.set('hour', payload.hour);
-    ['weather', 'road_surface', 'light', 'age_band', 'speed_limit', 'vehicle_type', 'road_type', 'junction']
-        .forEach(k => { if (payload[k] !== undefined && payload[k] !== '') params.set(k, payload[k]); });
-    const url = window.location.origin + window.location.pathname + '?' + params.toString() + '#predict';
-    const label = document.getElementById('share-label');
-    let ok = false;
-    try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(url);
-            ok = true;
-        }
-    } catch (e) { ok = false; }
-    if (!ok) {
-        try {
-            const field = document.createElement('input');
-            field.value = url;
-            document.body.appendChild(field);
-            field.select();
-            ok = document.execCommand('copy');
-            field.remove();
-        } catch (e) { ok = false; }
-    }
-    if (label) {
-        label.innerText = ok ? 'Link copied' : 'Copy failed';
-        setTimeout(() => { label.innerText = 'Copy link'; }, 1800);
-    }
-}
-
 // ---- Control plumbing ----
 function setCoords(lat, lng) {
     const a = document.getElementById('lat');
@@ -1273,8 +1243,6 @@ function initPredictor() {
     if (loc) loc.addEventListener('click', useMyLocation);
     const pin = document.getElementById('pin-btn');
     if (pin) pin.addEventListener('click', pinScenario);
-    const share = document.getElementById('share-btn');
-    if (share) share.addEventListener('click', copyLink);
 
     const fromLink = applyQueryState();
     syncCitySelect();
@@ -1392,10 +1360,11 @@ function syncCitySelect() {
     else if (hint) hint.innerText = 'Coordinates set by hand.';
 }
 
-// ---- Data insights: enlarge a chart card into a readable overlay ----
-let CHART_MODAL_BOX = null;
-let CHART_MODAL_HOME = null;
+// ---- Data insights: step through the charts one at a time, story-style ----
+let STORY_INDEX = 0;
 
+// Charts live inside panels that start hidden, so after a panel becomes visible
+// Chart.js has to re-measure the canvas it was given.
 function resizeChartIn(box) {
     if (!box || typeof Chart === 'undefined' || typeof Chart.getChart !== 'function') return;
     const canvas = box.querySelector('canvas');
@@ -1403,62 +1372,74 @@ function resizeChartIn(box) {
     if (chart) chart.resize();
 }
 
-function openChartModal(card) {
-    const modal = document.getElementById('chart-modal');
-    const body = document.getElementById('chart-modal-body');
-    const box = card.querySelector('.chart-box');
-    if (!modal || !body || !box) return;
-
-    const heading = card.querySelector('h3');
-    const title = document.getElementById('chart-modal-title');
-    const note = document.getElementById('chart-modal-note');
-    if (title) title.innerText = heading ? heading.innerText : 'Chart';
-    if (note) note.innerText = card.dataset.explain || '';
-
-    CHART_MODAL_BOX = box;
-    CHART_MODAL_HOME = { parent: box.parentNode, next: box.nextSibling };
-
-    body.appendChild(box);
-    modal.hidden = false;
-    document.body.style.overflow = 'hidden';
-    resizeChartIn(box);
-
-    const close = modal.querySelector('.chart-modal__close');
-    if (close) close.focus();
+function storySlides() {
+    return Array.from(document.querySelectorAll('#insights-story .story__slide'));
 }
 
-function closeChartModal() {
-    const modal = document.getElementById('chart-modal');
-    if (!modal || modal.hidden) return;
-    const box = CHART_MODAL_BOX;
-    if (box && CHART_MODAL_HOME) {
-        CHART_MODAL_HOME.parent.insertBefore(box, CHART_MODAL_HOME.next);
-    }
-    modal.hidden = true;
-    CHART_MODAL_BOX = null;
-    CHART_MODAL_HOME = null;
-    document.body.style.overflow = '';
-    if (box) resizeChartIn(box);
+function buildStoryBars(slides) {
+    const bars = document.getElementById('story-bars');
+    if (!bars) return;
+    bars.innerHTML = '';
+    slides.forEach((slide, i) => {
+        const bar = document.createElement('button');
+        bar.type = 'button';
+        bar.className = 'story__bar';
+        const title = slide.dataset.title || ('Pattern ' + (i + 1));
+        bar.setAttribute('aria-label', (i + 1) + ' of ' + slides.length + ': ' + title);
+        bar.addEventListener('click', () => showStory(i));
+        bars.appendChild(bar);
+    });
 }
 
-function initChartModal() {
-    const modal = document.getElementById('chart-modal');
-    if (!modal) return;
-    document.querySelectorAll('.chart-card').forEach(card => {
-        card.addEventListener('click', () => openChartModal(card));
-        card.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-                e.preventDefault();
-                openChartModal(card);
-            }
-        });
+function showStory(i) {
+    const slides = storySlides();
+    const n = slides.length;
+    if (!n) return;
+    STORY_INDEX = Math.max(0, Math.min(n - 1, i));
+
+    slides.forEach((slide, k) => {
+        const on = k === STORY_INDEX;
+        slide.classList.toggle('is-active', on);
+        if (on) slide.removeAttribute('aria-hidden');
+        else slide.setAttribute('aria-hidden', 'true');
     });
-    modal.querySelectorAll('[data-close-chart]').forEach(el => {
-        el.addEventListener('click', closeChartModal);
+
+    Array.from(document.querySelectorAll('#story-bars .story__bar')).forEach((bar, k) => {
+        bar.classList.toggle('is-active', k === STORY_INDEX);
+        bar.classList.toggle('is-done', k < STORY_INDEX);
     });
+
+    const count = document.getElementById('story-count');
+    if (count) count.innerText = (STORY_INDEX + 1) + ' / ' + n;
+    const prev = document.getElementById('story-prev');
+    const next = document.getElementById('story-next');
+    if (prev) prev.disabled = STORY_INDEX === 0;
+    if (next) next.disabled = STORY_INDEX === n - 1;
+
+    const box = slides[STORY_INDEX].querySelector('.chart-box');
+    if (box) requestAnimationFrame(() => resizeChartIn(box));
+}
+
+function initStory() {
+    const root = document.getElementById('insights-story');
+    if (!root) return;
+    const slides = storySlides();
+    if (!slides.length) return;
+    buildStoryBars(slides);
+
+    const prev = document.getElementById('story-prev');
+    const next = document.getElementById('story-next');
+    if (prev) prev.addEventListener('click', () => showStory(STORY_INDEX - 1));
+    if (next) next.addEventListener('click', () => showStory(STORY_INDEX + 1));
+
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeChartModal();
+        const tab = document.getElementById('tab-analytics');
+        if (!tab || tab.classList.contains('hidden')) return;
+        if (e.key === 'ArrowRight') { e.preventDefault(); showStory(STORY_INDEX + 1); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); showStory(STORY_INDEX - 1); }
     });
+
+    showStory(0);
 }
 
 // ---- Landing: the dial is real data, the copy cycles, both can be stilled ----
@@ -1731,7 +1712,7 @@ window.onload = function() {
     initLanding();
     initCharts();
     initMap();
-    initChartModal();
+    initStory();
     initAreaSearch();
     loadModelMetrics();
     // The predictor needs the city list before it can apply a shared link
