@@ -1,0 +1,140 @@
+{
+    "test_rows": 20850,
+    "class_names": [
+        "Fatal",
+        "Serious",
+        "Slight"
+    ],
+    "Logistic Regression": {
+        "per_class": {
+            "Fatal": {
+                "precision": 3.94,
+                "recall": 63.49,
+                "f1": 7.42,
+                "support": 304
+            },
+            "Serious": {
+                "precision": 29.31,
+                "recall": 36.12,
+                "f1": 32.36,
+                "support": 4687
+            },
+            "Slight": {
+                "precision": 84.64,
+                "recall": 54.32,
+                "f1": 66.17,
+                "support": 15859
+            }
+        },
+        "confusion_matrix": [
+            [
+                193,
+                81,
+                30
+            ],
+            [
+                1461,
+                1693,
+                1533
+            ],
+            [
+                3242,
+                4003,
+                8614
+            ]
+        ],
+        "accuracy": 50.36,
+        "balanced_accuracy": 51.31,
+        "mcc": 0.138,
+        "macro_auc": 67.79,
+        "logloss": 0.95
+    },
+    "Random Forest": {
+        "per_class": {
+            "Fatal": {
+                "precision": 5.38,
+                "recall": 35.53,
+                "f1": 9.35,
+                "support": 304
+            },
+            "Serious": {
+                "precision": 31.26,
+                "recall": 41.03,
+                "f1": 35.49,
+                "support": 4687
+            },
+            "Slight": {
+                "precision": 82.84,
+                "recall": 66.3,
+                "f1": 73.66,
+                "support": 15859
+            }
+        },
+        "confusion_matrix": [
+            [
+                108,
+                128,
+                68
+            ],
+            [
+                654,
+                1923,
+                2110
+            ],
+            [
+                1244,
+                4100,
+                10515
+            ]
+        ],
+        "accuracy": 60.17,
+        "balanced_accuracy": 47.62,
+        "mcc": 0.16,
+        "macro_auc": 67.48,
+        "logloss": 0.834
+    },
+    "XGBoost Classifier": {
+        "per_class": {
+            "Fatal": {
+                "precision": 5.16,
+                "recall": 39.14,
+                "f1": 9.12,
+                "support": 304
+            },
+            "Serious": {
+                "precision": 31.38,
+                "recall": 45.53,
+                "f1": 37.15,
+                "support": 4687
+            },
+            "Slight": {
+                "precision": 83.93,
+                "recall": 62.14,
+                "f1": 71.41,
+                "support": 15859
+            }
+        },
+        "confusion_matrix": [
+            [
+                119,
+                134,
+                51
+            ],
+            [
+                717,
+                2134,
+                1836
+            ],
+            [
+                1471,
+                4533,
+                9855
+            ]
+        ],
+        "accuracy": 58.07,
+        "balanced_accuracy": 48.94,
+        "mcc": 0.169,
+        "macro_auc": 69.37,
+        "logloss": 0.814
+    }
+}
